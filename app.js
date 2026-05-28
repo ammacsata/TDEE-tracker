@@ -1243,69 +1243,75 @@ function renderCompare() {
 }
 
 function renderSummary(days, dwd, sum, n) {
-  const daysTracked = dwd.length;
-  const onTarget = dwd.filter(d => d.cal <= goals.cal * 1.05).length;
-  const avgCal = Math.round(sum.cal / n);
+  // All-time stats: days tracked, streaks
+  const allDates = [...new Set(meals.map(m => m.date))].sort();
+  const totalDaysTracked = allDates.length;
 
-  // Streaks
-  let currentStreak = 0, longestStreak = 0, tempStreak = 0;
-  for (let i = days.length - 1; i >= 0; i--) {
-    if (days[i].cal > 0 && days[i].cal <= goals.cal * 1.05) {
-      if (i === days.length - 1 || currentStreak > 0) currentStreak++;
-      tempStreak++;
-    } else {
-      if (i >= days.length - 1 - currentStreak) currentStreak = tempStreak > 0 ? tempStreak : 0;
-      longestStreak = Math.max(longestStreak, tempStreak);
-      tempStreak = 0;
+  // Build all-time day-by-day data for streaks
+  if (allDates.length > 0) {
+    const first = new Date(allDates[0] + 'T12:00:00');
+    const last = new Date();
+    const allDays = [];
+    for (let d = new Date(first); d <= last; d.setDate(d.getDate()+1)) {
+      const ds = fmtDate(d);
+      const dayMeals = meals.filter(m => m.date === ds);
+      const cal = dayMeals.reduce((a,m) => a + m.calories, 0);
+      allDays.push({ date: ds, cal });
     }
+    // Current streak (from today backwards)
+    var currentStreak = 0;
+    for (let i = allDays.length - 1; i >= 0; i--) {
+      if (allDays[i].cal > 0 && allDays[i].cal <= goals.cal * 1.05) currentStreak++;
+      else break;
+    }
+    // Longest streak ever
+    var longestStreak = 0, tempStreak = 0;
+    for (let i = 0; i < allDays.length; i++) {
+      if (allDays[i].cal > 0 && allDays[i].cal <= goals.cal * 1.05) { tempStreak++; longestStreak = Math.max(longestStreak, tempStreak); }
+      else tempStreak = 0;
+    }
+  } else {
+    var currentStreak = 0, longestStreak = 0;
   }
-  // recalculate properly
-  currentStreak = 0;
-  for (let i = days.length - 1; i >= 0; i--) {
-    if (days[i].cal > 0 && days[i].cal <= goals.cal * 1.05) currentStreak++;
-    else break;
-  }
-  tempStreak = 0; longestStreak = 0;
-  for (let i = 0; i < days.length; i++) {
-    if (days[i].cal > 0 && days[i].cal <= goals.cal * 1.05) { tempStreak++; longestStreak = Math.max(longestStreak, tempStreak); }
-    else tempStreak = 0;
-  }
+
+  // 14-day average calories
+  const days14 = getDayTotals(14);
+  const dwd14 = days14.filter(d => d.cal > 0);
+  const n14 = dwd14.length || 1;
+  const avgCal14 = Math.round(dwd14.reduce((a,d) => a + d.cal, 0) / n14);
 
   document.getElementById('summaryGrid').innerHTML = `
-    <div class="summary-cell"><div class="summary-num">${daysTracked}</div><div class="summary-label">days tracked</div></div>
-    <div class="summary-cell"><div class="summary-num">${onTarget}</div><div class="summary-label">on target</div></div>
-    <div class="summary-cell"><div class="summary-num">${avgCal}</div><div class="summary-label">avg cal/day</div></div>
+    <div class="summary-cell"><div class="summary-num">${totalDaysTracked}</div><div class="summary-label">days tracked</div></div>
+    <div class="summary-cell"><div class="summary-num">${currentStreak}</div><div class="summary-label">current streak</div></div>
+    <div class="summary-cell"><div class="summary-num">${avgCal14}</div><div class="summary-label">avg cal (14d)</div></div>
   `;
 
   document.getElementById('streakRow').innerHTML = `
-    <div class="streak-pill"><div class="streak-num">${currentStreak}</div><div class="streak-label">current streak</div></div>
     <div class="streak-pill"><div class="streak-num">${longestStreak}</div><div class="streak-label">longest streak</div></div>
   `;
 
-  // Deficit/surplus based on weight trend (linear regression)
+  // Deficit/surplus based on last 14 days of weight data (linear regression)
   const defRow = document.getElementById('deficitRow');
-  if (weightLog.length >= 2) {
-    const recent = weightLog.slice(-Math.min(weightLog.length, trendRange));
-    if (recent.length >= 2) {
-      // Linear regression: y = weight, x = day number
-      const startDate = new Date(recent[0].date + 'T12:00:00');
-      const points = recent.map(w => ({
-        x: (new Date(w.date + 'T12:00:00') - startDate) / (1000*60*60*24),
-        y: w.value
-      }));
-      const n2 = points.length;
-      const sumX = points.reduce((a,p) => a+p.x, 0);
-      const sumY = points.reduce((a,p) => a+p.y, 0);
-      const sumXY = points.reduce((a,p) => a+p.x*p.y, 0);
-      const sumX2 = points.reduce((a,p) => a+p.x*p.x, 0);
-      const slope = (n2*sumXY - sumX*sumY) / (n2*sumX2 - sumX*sumX);
-      if (isFinite(slope) && !isNaN(slope)) {
-        const lbsPerWeek = slope * 7;
-        const calPerWeek = Math.round(lbsPerWeek * 3500);
-        const isDeficit = calPerWeek < 0;
-        defRow.style.display = '';
-        defRow.innerHTML = `<span>Estimated weekly</span> <span class="deficit-val ${isDeficit ? 'deficit' : 'surplus'}">${isDeficit ? '' : '+'}${calPerWeek} cal</span> <span>${isDeficit ? 'deficit' : 'surplus'}</span>`;
-      } else { defRow.style.display = 'none'; }
+  const cutoff14 = new Date(); cutoff14.setDate(cutoff14.getDate() - 15);
+  const recentWeight = weightLog.filter(w => new Date(w.date + 'T12:00:00') >= cutoff14);
+  if (recentWeight.length >= 2) {
+    const startDate = new Date(recentWeight[0].date + 'T12:00:00');
+    const points = recentWeight.map(w => ({
+      x: (new Date(w.date + 'T12:00:00') - startDate) / (1000*60*60*24),
+      y: w.value
+    }));
+    const n2 = points.length;
+    const sumX = points.reduce((a,p) => a+p.x, 0);
+    const sumY = points.reduce((a,p) => a+p.y, 0);
+    const sumXY = points.reduce((a,p) => a+p.x*p.y, 0);
+    const sumX2 = points.reduce((a,p) => a+p.x*p.x, 0);
+    const slope = (n2*sumXY - sumX*sumY) / (n2*sumX2 - sumX*sumX);
+    if (isFinite(slope) && !isNaN(slope)) {
+      const lbsPerWeek = slope * 7;
+      const calPerWeek = Math.round(lbsPerWeek * 3500);
+      const isDeficit = calPerWeek < 0;
+      defRow.style.display = '';
+      defRow.innerHTML = `<span>Estimated weekly</span> <span class="deficit-val ${isDeficit ? 'deficit' : 'surplus'}">${isDeficit ? '' : '+'}${calPerWeek} cal</span> <span>${isDeficit ? 'deficit' : 'surplus'}</span>`;
     } else { defRow.style.display = 'none'; }
   } else { defRow.style.display = 'none'; }
 }
