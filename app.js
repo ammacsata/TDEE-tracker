@@ -360,6 +360,30 @@ const CACHE_TTL = 5 * 60 * 1000;
 function getCached(key) { const e = responseCache.get(key); if (e && Date.now()-e.time < CACHE_TTL) return e.data; if (e) responseCache.delete(key); return null; }
 function setCache(key, data) { responseCache.set(key, {data, time:Date.now()}); if (responseCache.size > 50) responseCache.delete(responseCache.keys().next().value); }
 
+function safeParseJSON(text) {
+  // Try to extract clean JSON from potentially messy Claude responses
+  const clean = text.replace(/```json|```/g, '').trim();
+  // Try array first
+  const arrMatch = clean.match(/\[[\s\S]*\]/);
+  if (arrMatch) {
+    try { const arr = JSON.parse(arrMatch[0]); if (Array.isArray(arr)) return arr; } catch(e) {}
+    // Try to fix common issues: trailing commas, unquoted keys
+    try { const fixed = arrMatch[0].replace(/,\s*([}\]])/g, '$1'); const arr = JSON.parse(fixed); if (Array.isArray(arr)) return arr; } catch(e) {}
+  }
+  // Try single object
+  const objMatch = clean.match(/\{[\s\S]*?"meal_name"[\s\S]*?\}/);
+  if (objMatch) {
+    try { return [JSON.parse(objMatch[0])]; } catch(e) {}
+    try { const fixed = objMatch[0].replace(/,\s*}/g, '}'); return [JSON.parse(fixed)]; } catch(e) {}
+  }
+  // Try recipe_name object
+  const recMatch = clean.match(/\{[\s\S]*?"recipe_name"[\s\S]*?\}/);
+  if (recMatch) {
+    try { return JSON.parse(recMatch[0]); } catch(e) {}
+  }
+  return null;
+}
+
 async function callClaude(key, body) {
   checkRateLimit();
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -413,16 +437,8 @@ async function runEstimation(key, desc) {
     const data = await callClaude(key, estimateBody);
     const allText = data.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
     // Try to parse as array first, fall back to single object
-    let items;
-    const arrayMatch = allText.match(/\[[\s\S]*?\]/);
-    if (arrayMatch) {
-      items = JSON.parse(arrayMatch[0].replace(/```json|```/g,'').trim());
-    } else {
-      const objMatch = allText.match(/\{[\s\S]*?"meal_name"[\s\S]*?\}/);
-      if (!objMatch) throw new Error('Could not parse nutrition estimate. Try rephrasing your meal.');
-      items = [JSON.parse(objMatch[0].replace(/```json|```/g,'').trim())];
-    }
-    if (!Array.isArray(items) || items.length === 0) throw new Error('Could not parse nutrition estimate.');
+    let items = safeParseJSON(allText);
+    if (!items || (Array.isArray(items) && items.length === 0)) throw new Error('Could not parse nutrition estimate. Try rephrasing your meal.');
     const mealTypeFromClaude = items[0].meal_type && items[0].meal_type !== 'unspecified' ? items[0].meal_type : null;
     if (mealTypeFromClaude) setMealType(mealTypeFromClaude);
     pendingMeals = items.map(meal => {
@@ -1569,7 +1585,9 @@ async function suggestMeal() {
     const text=data.content.filter(b=>b.type==='text').map(b=>b.text).join('');
     const jsonMatch=text.match(/\{[\s\S]*?"meal_name"[\s\S]*?\}/);
     if (jsonMatch) {
-      const s=JSON.parse(jsonMatch[0].replace(/```json|```/g,'').trim());
+      let s;
+      try { s=JSON.parse(jsonMatch[0].replace(/```json|```/g,'').trim()); }
+      catch(e) { try { s=JSON.parse(jsonMatch[0].replace(/```json|```/g,'').replace(/,\s*}/g,'}').trim()); } catch(e2) { result.innerText=text; result.classList.add('show'); return; } }
       const macros=[
         {label:'cal',val:s.calories,goal:rem.cal,color:'var(--blue)'},
         {label:'protein',val:s.protein,goal:rem.prot,color:'var(--accent)'},
@@ -1664,7 +1682,9 @@ async function estimateRecipe() {
     const text = data.content.filter(b=>b.type==='text').map(b=>b.text).join('');
     const match = text.match(/\{[\s\S]*?"recipe_name"[\s\S]*?\}/);
     if (!match) throw new Error('Could not parse recipe. Try rephrasing.');
-    const r = JSON.parse(match[0].replace(/```json|```/g,'').trim());
+    let r;
+    try { r = JSON.parse(match[0].replace(/```json|```/g,'').trim()); }
+    catch(e) { try { r = JSON.parse(match[0].replace(/```json|```/g,'').replace(/,\s*}/g,'}').trim()); } catch(e2) { throw new Error('Could not parse recipe response. Try again.'); } }
     // Store per-serving values
     pendingRecipe = {
       recipe_name: r.recipe_name, description: desc, portions,
