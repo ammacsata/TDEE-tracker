@@ -301,14 +301,39 @@ function changeDate(delta) { viewDate.setDate(viewDate.getDate()+delta); renderT
 function goToToday() { viewDate = new Date(); renderToday(); }
 
 async function cycleMealType(id) {
+  // Handled by showMealTypeMenu now
+}
+
+function showMealTypeMenu(id, el) {
+  // Remove any existing menu
+  const old = document.getElementById('mealTypeMenu');
+  if (old) old.remove();
   const types = ['Breakfast','Lunch','Dinner','Snack'];
   const meal = meals.find(m => m.id === id);
   if (!meal) return;
-  const idx = types.indexOf(meal.type);
-  meal.type = types[(idx + 1) % types.length];
-  if (supaReady) { try { await supa('meals','PATCH',{query:`id=eq.${id}`,body:{meal_type:meal.type}}); } catch(e){} }
+  const menu = document.createElement('div');
+  menu.id = 'mealTypeMenu';
+  menu.className = 'meal-type-menu';
+  menu.innerHTML = types.map(t =>
+    `<div class="meal-type-option${t === meal.type ? ' active' : ''}" onclick="changeMealType(${id},'${t}')">${t}</div>`
+  ).join('');
+  el.style.position = 'relative';
+  el.appendChild(menu);
+  // Close on outside click
+  setTimeout(() => {
+    const close = (e) => { if (!menu.contains(e.target)) { menu.remove(); document.removeEventListener('click', close); } };
+    document.addEventListener('click', close);
+  }, 10);
+}
+
+async function changeMealType(id, type) {
+  const meal = meals.find(m => m.id === id);
+  if (!meal || meal.type === type) { const m = document.getElementById('mealTypeMenu'); if(m) m.remove(); return; }
+  meal.type = type;
+  if (supaReady) { try { await supa('meals','PATCH',{query:`id=eq.${id}`,body:{meal_type:type}}); } catch(e){} }
+  const m = document.getElementById('mealTypeMenu'); if(m) m.remove();
   renderToday();
-  showQuickToast('Moved to ' + meal.type);
+  showQuickToast('Moved to ' + type);
 }
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
@@ -339,7 +364,7 @@ function switchTab(name) {
   const names = ['log','today','trends','recipes','settings'];
   document.querySelectorAll('.tab-btn').forEach((t,i) => t.classList.toggle('active', names[i]===name));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id==='tab-'+name));
-  if (name === 'today') renderToday();
+  if (name === 'today') { viewDate = new Date(); renderToday(); }
   if (name === 'trends') renderTrends();
   if (name === 'log') renderFavorites();
   if (name === 'recipes') renderRecipes();
@@ -914,8 +939,6 @@ function renderToday() {
   const ds = fmtDate(viewDate);
   const isViewingToday = ds === fmtDate(new Date());
   document.getElementById('dateLabel').textContent = dateLabelFn(viewDate);
-  document.getElementById('dateLabel').style.textDecoration = isViewingToday ? 'none' : 'underline';
-  document.getElementById('dateLabel').title = isViewingToday ? '' : 'Click to return to today';
   const day = meals.filter(m => m.date === ds);
   const dayEx = exerciseLog.filter(e => e.date === ds);
   const exCal = dayEx.reduce((a,e) => a + e.calories_burned, 0);
@@ -988,7 +1011,7 @@ function renderToday() {
       html += `<li>
         <div class="meal-item">
           <div class="meal-item-left"><div class="meal-item-name">${esc(m.meal_name)}</div><div class="meal-item-meta">${esc(m.time)} · ${m.protein}g P · ${m.carbs}g C · ${m.fat}g F · ${m.fiber||0}g f</div></div>
-          <span class="meal-type-badge" onclick="cycleMealType(${m.id})" title="Click to change meal type">${esc(m.type)}</span>
+          <span class="meal-type-badge" onclick="event.stopPropagation();showMealTypeMenu(${m.id},this)" title="Click to change meal type">${esc(m.type)}</span>
           <span class="meal-item-cal" onclick="openEditModal(${m.id})" style="cursor:pointer;" title="Edit macros">${m.calories}</span>
           <div class="meal-actions">
             ${isPast ? `<button class="log-today-btn" onclick="logMealToToday(${m.id})">+Today</button>` : ''}
@@ -1072,13 +1095,15 @@ function getDayTotals(numDays) {
 }
 
 let chartMeta = {};
+let weightRange = 30;
 
 function drawChart(canvasId, datasets, labels, goalLine, minVal, maxValOverride) {
   const canvas = document.getElementById(canvasId);
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.parentElement.getBoundingClientRect().width;
-  const h = parseInt(canvas.getAttribute('height')) || 200;
+  const h = parseInt(canvas.style.height) || parseInt(canvas.dataset.h) || 200;
+  canvas.dataset.h = h;
   canvas.width = w*dpr; canvas.height = h*dpr;
   canvas.style.width = w+'px'; canvas.style.height = h+'px';
   ctx.scale(dpr,dpr); ctx.clearRect(0,0,w,h);
@@ -1126,11 +1151,12 @@ function drawBarChart(canvasId, datasets, labels, goalLine) {
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.parentElement.getBoundingClientRect().width;
-  const h = parseInt(canvas.getAttribute('height')) || 200;
+  const h = parseInt(canvas.style.height) || parseInt(canvas.dataset.h) || 200;
+  canvas.dataset.h = h;
   canvas.width = w*dpr; canvas.height = h*dpr;
   canvas.style.width = w+'px'; canvas.style.height = h+'px';
   ctx.scale(dpr,dpr); ctx.clearRect(0,0,w,h);
-  const padL=44, padR=16, padT=16, padB=32;
+  const padL=44, padR=36, padT=16, padB=32;
   const chartW=w-padL-padR, chartH=h-padT-padB;
   const allVals = datasets.flatMap(d=>d.data);
   if (goalLine) allVals.push(goalLine);
@@ -1504,11 +1530,28 @@ async function saveWeightEntry(date,value) {
   renderToday();
 }
 
+function setWeightRange(days) {
+  weightRange = days;
+  document.querySelectorAll('#weightRangeToggle .range-btn').forEach(b => {
+    const label = days === 0 ? 'All' : days === 90 ? '3m' : days === 180 ? '6m' : days + 'd';
+    b.classList.toggle('active', b.textContent === label);
+  });
+  renderWeightChart();
+}
+
 function renderWeightChart() {
   const chart=document.getElementById('weightChart'),empty=document.getElementById('weightEmpty');
   if(weightLog.length<1){chart.style.display='none';empty.style.display='';return;}
   chart.style.display='';empty.style.display='none';
-  const recent=weightLog.slice(-trendRange);
+  let recent;
+  if (weightRange === 0) {
+    recent = weightLog;
+  } else {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - weightRange);
+    recent = weightLog.filter(w => new Date(w.date + 'T12:00:00') >= cutoff);
+    if (recent.length < 1) recent = weightLog.slice(-2);
+  }
   const labels=recent.map(w=>{const d=new Date(w.date+'T12:00:00');return d.toLocaleDateString(undefined,{month:'short',day:'numeric'});});
   const cs=getComputedStyle(document.documentElement);
   const vals = recent.map(w=>w.value);

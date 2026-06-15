@@ -684,6 +684,27 @@ body {
   letter-spacing: 0.3px;
 }
 .meal-type-badge:hover { color: var(--text-1); background: var(--bg-hover); }
+.meal-type-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  z-index: 100;
+  min-width: 120px;
+  overflow: hidden;
+}
+.meal-type-option {
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--text-1);
+  cursor: pointer;
+}
+.meal-type-option:hover { background: var(--bg-hover); }
+.meal-type-option.active { color: var(--accent); font-weight: 600; }
 .meal-actions {
   display: flex;
   align-items: center;
