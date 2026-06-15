@@ -671,6 +671,19 @@ body {
   line-height: 1;
 }
 .edit-btn:hover { color: var(--blue); background: rgba(43,108,176,0.08); }
+.meal-type-badge {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-3);
+  background: var(--bg-input);
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.meal-type-badge:hover { color: var(--text-1); background: var(--bg-hover); }
 .meal-actions {
   display: flex;
   align-items: center;

@@ -298,6 +298,18 @@ function dateLabelFn(d) {
   return d.toLocaleDateString(undefined, {weekday:'short', month:'short', day:'numeric'});
 }
 function changeDate(delta) { viewDate.setDate(viewDate.getDate()+delta); renderToday(); }
+function goToToday() { viewDate = new Date(); renderToday(); }
+
+async function cycleMealType(id) {
+  const types = ['Breakfast','Lunch','Dinner','Snack'];
+  const meal = meals.find(m => m.id === id);
+  if (!meal) return;
+  const idx = types.indexOf(meal.type);
+  meal.type = types[(idx + 1) % types.length];
+  if (supaReady) { try { await supa('meals','PATCH',{query:`id=eq.${id}`,body:{meal_type:meal.type}}); } catch(e){} }
+  renderToday();
+  showQuickToast('Moved to ' + meal.type);
+}
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
 function checkReady() {
@@ -899,8 +911,11 @@ async function resetAll() {
 }
 
 function renderToday() {
-  document.getElementById('dateLabel').textContent = dateLabelFn(viewDate);
   const ds = fmtDate(viewDate);
+  const isViewingToday = ds === fmtDate(new Date());
+  document.getElementById('dateLabel').textContent = dateLabelFn(viewDate);
+  document.getElementById('dateLabel').style.textDecoration = isViewingToday ? 'none' : 'underline';
+  document.getElementById('dateLabel').title = isViewingToday ? '' : 'Click to return to today';
   const day = meals.filter(m => m.date === ds);
   const dayEx = exerciseLog.filter(e => e.date === ds);
   const exCal = dayEx.reduce((a,e) => a + e.calories_burned, 0);
@@ -927,7 +942,11 @@ function renderToday() {
   const barColor = pctUsed < 75 ? '#22C55E' : pctUsed < 95 ? '#F59E0B' : '#EF4444';
   document.getElementById('calRemainingFill').style.width = Math.min(pctUsed, 100) + '%';
   document.getElementById('calRemainingFill').style.background = barColor;
-  document.getElementById('calRemainingText').textContent = remaining > 0 ? remaining + ' cal remaining' : Math.abs(remaining) + ' cal over';
+  if (remaining > 0) {
+    document.getElementById('calRemainingText').textContent = remaining + (isViewingToday ? ' cal remaining' : ' cal under');
+  } else {
+    document.getElementById('calRemainingText').textContent = Math.abs(remaining) + ' cal over';
+  }
   const bars = [
     {label:'Calories (net)',val:Math.max(0,netCal),goal:goals.cal,color:'#22C55E'},
     {label:'Protein',val:t.prot,goal:goals.prot,color:'#3B82F6'},
@@ -969,6 +988,7 @@ function renderToday() {
       html += `<li>
         <div class="meal-item">
           <div class="meal-item-left"><div class="meal-item-name">${esc(m.meal_name)}</div><div class="meal-item-meta">${esc(m.time)} · ${m.protein}g P · ${m.carbs}g C · ${m.fat}g F · ${m.fiber||0}g f</div></div>
+          <span class="meal-type-badge" onclick="cycleMealType(${m.id})" title="Click to change meal type">${esc(m.type)}</span>
           <span class="meal-item-cal" onclick="openEditModal(${m.id})" style="cursor:pointer;" title="Edit macros">${m.calories}</span>
           <div class="meal-actions">
             ${isPast ? `<button class="log-today-btn" onclick="logMealToToday(${m.id})">+Today</button>` : ''}
@@ -1051,7 +1071,9 @@ function getDayTotals(numDays) {
   return days;
 }
 
-function drawChart(canvasId, datasets, labels, goalLine, minVal) {
+let chartMeta = {};
+
+function drawChart(canvasId, datasets, labels, goalLine, minVal, maxValOverride) {
   const canvas = document.getElementById(canvasId);
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
@@ -1065,7 +1087,7 @@ function drawChart(canvasId, datasets, labels, goalLine, minVal) {
   const allVals = datasets.flatMap(d=>d.data).filter(v=>v>0);
   if (goalLine) allVals.push(goalLine);
   const floor = minVal != null ? minVal : 0;
-  const maxVal = Math.max(...allVals,floor+1)*1.1;
+  const maxVal = maxValOverride != null ? maxValOverride : Math.max(...allVals,floor+1)*1.1;
   const range = maxVal - floor;
   const isDark = document.documentElement.classList.contains('dark-mode') || (!document.documentElement.classList.contains('light-mode') && window.matchMedia('(prefers-color-scheme:dark)').matches);
   const gridColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
@@ -1095,6 +1117,8 @@ function drawChart(canvasId, datasets, labels, goalLine, minVal) {
     ctx.stroke();
     ds.data.forEach((val,i) => { if(val>0){ctx.beginPath();ctx.fillStyle=ds.color;ctx.arc(padL+i*step,padT+chartH-((val-floor)/range)*chartH,3.5,0,Math.PI*2);ctx.fill();} });
   });
+  // Store metadata for click navigation
+  chartMeta[canvasId] = { labels, step, padL, w };
 }
 
 function drawBarChart(canvasId, datasets, labels, goalLine) {
@@ -1136,19 +1160,20 @@ function drawBarChart(canvasId, datasets, labels, goalLine) {
   ctx.textAlign='center'; ctx.fillStyle=textColor;
   const numDays = labels.length;
   const numBars = datasets.length;
-  const groupWidth = chartW / numDays;
-  const barGap = 2;
+  const groupGap = Math.max(6, chartW / numDays * 0.3);
+  const groupWidth = (chartW - groupGap * (numDays - 1)) / numDays;
+  const barGap = 1;
   const barWidth = Math.max(2, (groupWidth - (numBars+1)*barGap) / numBars);
   const showEvery = numDays > 14 ? 3 : numDays > 8 ? 2 : 1;
   labels.forEach((lbl, i) => {
-    const groupX = padL + i * groupWidth;
+    const groupX = padL + i * (groupWidth + groupGap);
     if (i % showEvery === 0 || i === numDays-1) ctx.fillText(lbl, groupX + groupWidth/2, h-8);
   });
   // Draw bars
   datasets.forEach((ds, di) => {
     ds.data.forEach((val, i) => {
       if (val <= 0) return;
-      const groupX = padL + i * groupWidth;
+      const groupX = padL + i * (groupWidth + groupGap);
       const x = groupX + barGap + di * (barWidth + barGap);
       const barH = (val / maxVal) * chartH;
       const y = padT + chartH - barH;
@@ -1159,6 +1184,8 @@ function drawBarChart(canvasId, datasets, labels, goalLine) {
       ctx.fill();
     });
   });
+  // Store metadata for click navigation
+  chartMeta[canvasId] = { labels, groupWidth, groupGap, padL, w };
 }
 
 function renderTrends() {
@@ -1206,6 +1233,11 @@ function renderTrends() {
   renderDonut(sum, n);
   renderWeightChart();
   renderCompare();
+  // Store dates for chart click navigation
+  const dates = days.map(d => d.date);
+  if (chartMeta['calChart']) chartMeta['calChart'].dates = dates;
+  if (chartMeta['macroChart']) chartMeta['macroChart'].dates = dates;
+  if (chartMeta['macroPctChart']) chartMeta['macroPctChart'].dates = dates;
 }
 
 function setCompare(mode) {
@@ -1216,16 +1248,27 @@ function setCompare(mode) {
 
 function getDateRange(numDays, offset) {
   const days = [];
+  let weightSum = 0, weightCount = 0, exSum = 0, exDays = 0;
   for (let i = numDays - 1 + offset; i >= offset; i--) {
     const d = new Date(); d.setDate(d.getDate() - i);
     const ds = fmtDate(d);
     const dm = meals.filter(m => m.date === ds);
     const t = dm.reduce((a,m) => ({cal:a.cal+m.calories,prot:a.prot+m.protein,carbs:a.carbs+m.carbs,fat:a.fat+m.fat,fiber:a.fiber+(m.fiber||0)}),{cal:0,prot:0,carbs:0,fat:0,fiber:0});
     days.push(t);
+    const w = weightLog.find(w => w.date === ds);
+    if (w) { weightSum += w.value; weightCount++; }
+    const dayEx = exerciseLog.filter(e => e.date === ds);
+    const exCal = dayEx.reduce((a,e) => a + e.calories_burned, 0);
+    if (exCal > 0) { exSum += exCal; exDays++; }
   }
   const n = days.filter(d=>d.cal>0).length || 1;
   const sum = days.reduce((a,d)=>({cal:a.cal+d.cal,prot:a.prot+d.prot,carbs:a.carbs+d.carbs,fat:a.fat+d.fat,fiber:a.fiber+d.fiber}),{cal:0,prot:0,carbs:0,fat:0,fiber:0});
-  return { avg: {cal:Math.round(sum.cal/n),prot:Math.round(sum.prot/n),carbs:Math.round(sum.carbs/n),fat:Math.round(sum.fat/n),fiber:Math.round(sum.fiber/n)}, days: n };
+  return {
+    avg: {cal:Math.round(sum.cal/n),prot:Math.round(sum.prot/n),carbs:Math.round(sum.carbs/n),fat:Math.round(sum.fat/n),fiber:Math.round(sum.fiber/n)},
+    days: n,
+    avgWeight: weightCount > 0 ? Math.round(weightSum/weightCount*10)/10 : null,
+    avgExercise: exDays > 0 ? Math.round(exSum/exDays) : 0
+  };
 }
 
 function renderCompare() {
@@ -1239,20 +1282,25 @@ function renderCompare() {
     {label:'Avg carbs', cur:current.avg.carbs, prev:prior.avg.carbs, lessIsBetter:true},
     {label:'Avg fat', cur:current.avg.fat, prev:prior.avg.fat, lessIsBetter:true},
     {label:'Avg fiber', cur:current.avg.fiber, prev:prior.avg.fiber, lessIsBetter:false},
+    {label:'Avg exercise', cur:current.avgExercise, prev:prior.avgExercise, lessIsBetter:false, suffix:' cal'},
+    {label:'Avg weight', cur:current.avgWeight, prev:prior.avgWeight, lessIsBetter:true, suffix:' lbs'},
     {label:'Days tracked', cur:current.days, prev:prior.days, lessIsBetter:false}
   ];
   const container = document.getElementById('compareResult');
   let html = `<div class="compare-header"><span></span><span style="text-align:center;">${labels[0]}</span><span style="text-align:center;">${labels[1]}</span></div>`;
   metrics.forEach(m => {
-    const diff = m.cur - m.prev;
+    if (m.cur === null && m.prev === null) return; // skip if no data
+    const curDisplay = m.cur !== null ? m.cur + (m.suffix||'') : '—';
+    const prevDisplay = m.prev !== null ? m.prev + (m.suffix||'') : '—';
+    const diff = (m.cur || 0) - (m.prev || 0);
     const pct = m.prev > 0 ? Math.round(Math.abs(diff)/m.prev*100) : 0;
-    const isGood = diff === 0 ? null : (m.lessIsBetter ? diff < 0 : diff > 0);
+    const isGood = diff === 0 || m.cur === null || m.prev === null ? null : (m.lessIsBetter ? diff < 0 : diff > 0);
     const arrow = diff > 0 ? '↑' : diff < 0 ? '↓' : '';
     const deltaClass = isGood === null ? '' : isGood ? 'down' : 'up';
     html += `<div class="compare-row">
       <span class="compare-label">${m.label}</span>
-      <span class="compare-val">${m.cur} ${diff!==0?`<span class="compare-delta ${deltaClass}">${arrow}${pct}%</span>`:''}</span>
-      <span class="compare-val">${m.prev}</span>
+      <span class="compare-val">${curDisplay} ${diff!==0 && m.cur!==null && m.prev!==null?`<span class="compare-delta ${deltaClass}">${arrow}${pct}%</span>`:''}</span>
+      <span class="compare-val">${prevDisplay}</span>
     </div>`;
   });
   container.innerHTML = html;
@@ -1465,18 +1513,22 @@ function renderWeightChart() {
   const cs=getComputedStyle(document.documentElement);
   const vals = recent.map(w=>w.value);
   const minW = Math.min(...vals);
-  const chartMin = Math.floor(minW * 0.9);
-  drawChart('weightChart',[{data:vals,color:cs.getPropertyValue('--teal').trim()||'#1A7A6D'}],labels,null,chartMin);
+  const maxW = Math.max(...vals);
+  const chartMin = Math.floor(minW - 3);
+  const chartMax = Math.ceil(maxW + 3);
+  drawChart('weightChart',[{data:vals,color:cs.getPropertyValue('--teal').trim()||'#1A7A6D'}],labels,null,chartMin,chartMax);
+  if (chartMeta['weightChart']) chartMeta['weightChart'].dates = recent.map(w => w.date);
 }
 
 function renderTDEE() {
   const tdeeRow = document.getElementById('tdeeRow');
-  // Need at least 2 weeks of data with both calories and weight
   if (weightLog.length < 2) { tdeeRow.style.display = 'none'; return; }
-  // Get last 14 days of calorie data
+  const refDate = viewDate;
+  const refDs = fmtDate(refDate);
+  // Get 14 days of calorie data ending on the viewed date
   const days14 = [];
   for (let i = 13; i >= 0; i--) {
-    const d = new Date(); d.setDate(d.getDate() - i);
+    const d = new Date(refDate); d.setDate(d.getDate() - i);
     const ds = fmtDate(d);
     const dm = meals.filter(m => m.date === ds);
     const dayEx = exerciseLog.filter(e => e.date === ds);
@@ -1485,10 +1537,11 @@ function renderTDEE() {
     if (cal > 0) days14.push({ date: ds, cal, ex });
   }
   if (days14.length < 7) { tdeeRow.style.display = 'none'; return; }
-  // Get weight change over same period using linear regression
+  // Get weight data for 15 days before viewed date
+  const cutoff = new Date(refDate); cutoff.setDate(cutoff.getDate() - 15);
   const recentWeight = weightLog.filter(w => {
-    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 15);
-    return new Date(w.date + 'T12:00:00') >= cutoff;
+    const wd = new Date(w.date + 'T12:00:00');
+    return wd >= cutoff && wd <= refDate;
   });
   if (recentWeight.length < 2) { tdeeRow.style.display = 'none'; return; }
   const startDate = new Date(recentWeight[0].date + 'T12:00:00');
@@ -1866,5 +1919,33 @@ setInterval(async () => {
     else console.warn('Token refresh failed');
   }
 }, 45 * 60 * 1000);
+
+// Chart click navigation
+['calChart','macroChart','macroPctChart','weightChart'].forEach(id => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('click', e => {
+    const meta = chartMeta[id];
+    if (!meta || !meta.dates) return;
+    const rect = el.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    // Find nearest data point
+    let nearestIdx = 0, nearestDist = Infinity;
+    meta.dates.forEach((d, i) => {
+      let pointX;
+      if (meta.step) {
+        pointX = meta.padL + i * meta.step;
+      } else if (meta.groupWidth != null) {
+        pointX = meta.padL + i * (meta.groupWidth + (meta.groupGap||0)) + meta.groupWidth/2;
+      } else return;
+      const dist = Math.abs(clickX - pointX);
+      if (dist < nearestDist) { nearestDist = dist; nearestIdx = i; }
+    });
+    if (nearestDist < 40 && meta.dates[nearestIdx]) {
+      viewDate = new Date(meta.dates[nearestIdx] + 'T12:00:00');
+      switchTab('today');
+    }
+  });
+});
 
 init();
