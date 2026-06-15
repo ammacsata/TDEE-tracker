@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nutritracker-v1.19';
+const CACHE_NAME = 'nutritracker-v1.20';
 const BASE = '/nutritracker/';
 const ASSETS = [
   BASE + 'index.html',

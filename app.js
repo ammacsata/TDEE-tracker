@@ -1,4 +1,4 @@
-// nutritracker v1.19 — app.js
+// nutritracker v1.20 — app.js
 const LS_CREDS = 'nutritracker_creds';
 const LS_SESSION = 'nutritracker_session';
 const SUPA_URL = 'https://whdamcifxsjfmnzgdrxe.supabase.co';
