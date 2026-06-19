@@ -1816,7 +1816,7 @@ async function confirmRecipe() {
       const rows = await supa('recipes','POST',{body:recipe});
       recipe.id = rows[0].id;
       setSyncStatus('ok','synced');
-    } catch(e) { recipe.id = Date.now(); setSyncStatus('err','sync error'); }
+    } catch(e) { recipe.id = Date.now(); setSyncStatus('err','save failed'); showQuickToast('⚠ Recipe save failed — stored locally only'); logError('recipeSave', e.message); }
   } else { recipe.id = Date.now(); }
   recipes.unshift(recipe);
   pendingRecipe = null;
@@ -1928,7 +1928,7 @@ async function addMealGroupAsRecipe(type, date) {
       const rows = await supa('recipes','POST',{body:recipe});
       recipe.id = rows[0].id;
       setSyncStatus('ok','synced');
-    } catch(e) { recipe.id = Date.now(); setSyncStatus('err','sync error'); }
+    } catch(e) { recipe.id = Date.now(); setSyncStatus('err','save failed'); showQuickToast('⚠ Recipe save failed'); logError('recipeSave', e.message); }
   } else { recipe.id = Date.now(); }
   recipes.unshift(recipe);
   renderRecipes();
