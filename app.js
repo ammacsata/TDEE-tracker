@@ -1582,6 +1582,7 @@ async function saveWeightEntry(date,value) {
   } else { if(existing>=0) weightLog[existing].value=value; else weightLog.push({date,value,id:Date.now()}); }
   weightLog.sort((a,b)=>a.date.localeCompare(b.date));
   document.getElementById('weightInput').value='';
+  showQuickToast(value + ' lbs logged for ' + date);
   if(document.getElementById('tab-trends').classList.contains('active')) renderTrends();
   renderToday();
 }
@@ -1963,6 +1964,7 @@ async function logExercise() {
       } else { entry.id = Date.now(); }
       exerciseLog.unshift(entry);
       document.getElementById('exerciseInput').value = '';
+      showQuickToast(entry.description + ' — ' + entry.calories_burned + ' cal burned');
       renderToday();
     }
   } catch(e) {
@@ -1974,6 +1976,7 @@ async function logExercise() {
       } else { entry.id = Date.now(); }
       exerciseLog.unshift(entry);
       document.getElementById('exerciseInput').value = '';
+      showQuickToast(entry.description + ' — ' + entry.calories_burned + ' cal burned');
       renderToday();
     }
   }
