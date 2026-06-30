@@ -1684,23 +1684,49 @@ function renderGoalWeight() {
   const lbsToChange = currentW - goalWeight;
   const lbsPerWeek = (lbsToChange / daysLeft) * 7;
   const dailyDeficit = Math.round((lbsToChange * 3500) / daysLeft);
-  const weeklyDeficit = dailyDeficit * 7;
-  let advice = '';
-  if (tdee) {
-    const targetCal = tdee - dailyDeficit;
-    if (lbsToChange > 0) {
-      advice = `Eat ~<strong>${targetCal}</strong> cal/day to reach <strong>${goalWeight} lbs</strong> by ${targetDate.toLocaleDateString(undefined,{month:'short',day:'numeric'})} · ${weeksLeft} wks · ${Math.abs(lbsPerWeek).toFixed(1)} lbs/wk · ${Math.abs(dailyDeficit)} cal/day deficit`;
-    } else if (lbsToChange < 0) {
-      advice = `Eat ~<strong>${targetCal}</strong> cal/day to reach <strong>${goalWeight} lbs</strong> by ${targetDate.toLocaleDateString(undefined,{month:'short',day:'numeric'})} · ${weeksLeft} wks · +${Math.abs(lbsPerWeek).toFixed(1)} lbs/wk · +${Math.abs(dailyDeficit)} cal/day surplus`;
-    } else {
-      advice = `You're at your goal weight! Maintain at ~<strong>${tdee}</strong> cal/day`;
-    }
-    if (Math.abs(lbsPerWeek) > 2) advice += ' <span style="color:var(--coral);">⚠ Aggressive pace</span>';
+  if (!tdee) { row.style.display = 'none'; return; }
+  const targetCal = tdee - dailyDeficit;
+  const direction = lbsToChange > 0 ? 'deficit' : 'surplus';
+  if (lbsToChange === 0) {
+    document.getElementById('goalWeightAdvice').innerHTML = `<span style="cursor:pointer;" onclick="showGoalDetail()">Maintain at <strong>${tdee}</strong> cal/day</span>`;
   } else {
-    advice = `${Math.abs(lbsToChange).toFixed(1)} lbs to ${lbsToChange > 0 ? 'lose' : 'gain'} · ${weeksLeft} wks · ${Math.abs(lbsPerWeek).toFixed(1)} lbs/wk. Need more data for calorie target.`;
+    document.getElementById('goalWeightAdvice').innerHTML = `<span style="cursor:pointer;" onclick="showGoalDetail()">Target: <strong>${targetCal}</strong> cal/day <span style="color:var(--text-3);">(${Math.abs(dailyDeficit)} cal ${direction})</span></span>`;
   }
-  document.getElementById('goalWeightAdvice').innerHTML = advice;
+  // Store detail for popup
+  row.dataset.detail = JSON.stringify({targetCal, goalWeight, currentW, tdee, dailyDeficit, weeklyDeficit: dailyDeficit*7, lbsToChange, lbsPerWeek, weeksLeft, targetDate: targetDate.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}), direction});
+  if (Math.abs(lbsPerWeek) > 2) {
+    document.getElementById('goalWeightAdvice').innerHTML += ' <span style="color:var(--coral);font-size:11px;">⚠ aggressive</span>';
+  }
   row.style.display = '';
+}
+
+function showGoalDetail() {
+  const row = document.getElementById('goalWeightRow');
+  const d = JSON.parse(row.dataset.detail || '{}');
+  if (!d.tdee) return;
+  const existing = document.getElementById('goalDetailPopup');
+  if (existing) { existing.remove(); return; }
+  const popup = document.createElement('div');
+  popup.id = 'goalDetailPopup';
+  popup.className = 'goal-detail-popup';
+  popup.innerHTML = `
+    <div class="goal-detail-row"><span>Current weight</span><strong>${d.currentW} lbs</strong></div>
+    <div class="goal-detail-row"><span>Goal weight</span><strong>${d.goalWeight} lbs</strong></div>
+    <div class="goal-detail-row"><span>Target date</span><strong>${d.targetDate}</strong></div>
+    <div class="goal-detail-row"><span>Time remaining</span><strong>${d.weeksLeft} weeks</strong></div>
+    <div class="goal-detail-row"><span>Rate</span><strong>${Math.abs(d.lbsPerWeek).toFixed(1)} lbs/week</strong></div>
+    <div class="goal-detail-divider"></div>
+    <div class="goal-detail-row"><span>Estimated TDEE</span><strong>${d.tdee} cal/day</strong></div>
+    <div class="goal-detail-row"><span>Daily ${d.direction}</span><strong>${Math.abs(d.dailyDeficit)} cal</strong></div>
+    <div class="goal-detail-row"><span>Weekly ${d.direction}</span><strong>${Math.abs(d.weeklyDeficit).toLocaleString()} cal</strong></div>
+    <div class="goal-detail-row"><span>Daily target</span><strong>${d.targetCal} cal</strong></div>
+  `;
+  row.style.position = 'relative';
+  row.appendChild(popup);
+  setTimeout(() => {
+    const close = (e) => { if (!popup.contains(e.target)) { popup.remove(); document.removeEventListener('click', close); } };
+    document.addEventListener('click', close);
+  }, 10);
 }
 
 function renderGoalWeightSummary() {

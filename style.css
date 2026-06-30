@@ -387,6 +387,36 @@ body {
   line-height: 1.5;
   margin: 0;
 }
+.goal-detail-popup {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  padding: 16px;
+  z-index: 100;
+  min-width: 240px;
+  max-width: 300px;
+}
+.goal-detail-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 5px 0;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.goal-detail-row strong {
+  color: var(--text-1);
+}
+.goal-detail-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 0;
+}
 
 /* Calibration note inline */
 .cal-toggle {
