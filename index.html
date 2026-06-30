@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Fraunces:opsz,wght@9..144,400;9..144,600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=1.22">
+  <link rel="stylesheet" href="style.css?v=1.22a">
 </head>
 <body>
   <!-- AUTH OVERLAY -->
@@ -121,14 +121,14 @@
         </div>
         <p style="font-size:11px;color:var(--text-3);margin-top:6px;">Describe your exercise — Claude will estimate calories burned.</p>
       </div>
-      <div class="card" id="favoritesCard" style="display:none;">
-        <div class="card-label">Quick log</div>
-        <div class="fav-list" id="favList"></div>
-      </div>
       <div class="card">
         <div class="card-label">Search past meals</div>
         <input type="text" class="cal-input-field" id="mealSearchInput" placeholder="Search by name..." oninput="searchMeals()" />
         <div id="searchResults" style="margin-top:10px;"></div>
+      </div>
+      <div class="card" id="favoritesCard" style="display:none;">
+        <div class="card-label">Quick log</div>
+        <div class="fav-list" id="favList"></div>
       </div>
     </div>
 
@@ -137,9 +137,8 @@
       <div class="card">
         <div class="date-nav">
           <button class="date-btn" onclick="changeDate(-1)">‹</button>
-          <span class="date-label" id="dateLabel">Today</span>
+          <span class="date-label" id="dateLabel" onclick="toggleCalendar()" style="cursor:pointer;">Today</span>
           <button class="date-btn" onclick="changeDate(1)">›</button>
-          <button class="date-btn" onclick="toggleCalendar()" style="margin-left:8px;font-size:14px;">📅</button>
         </div>
         <div id="calendarView" style="display:none;margin-bottom:16px;"></div>
         <div class="cal-remaining-bar" id="calRemainingBar">
@@ -436,7 +435,7 @@
     </div>
   </div>
 
-  <script src="app.js?v=1.22"></script>
+  <script src="app.js?v=1.22a"></script>
   <script>
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch(() => {});

@@ -1517,7 +1517,8 @@ function renderFavorites() {
   const card=document.getElementById('favoritesCard'), list=document.getElementById('favList');
   if (favorites.length===0){card.style.display='none';return;}
   card.style.display='';
-  list.innerHTML=favorites.map(f=>`<div class="fav-item"><div class="fav-item-left"><div class="fav-item-name">${esc(f.meal_name)}</div><div class="fav-item-macros">${f.calories} cal · ${f.protein}g P · ${f.carbs}g C · ${f.fat}g F · ${f.fiber||0}g f</div></div><div class="fav-item-actions"><button class="fav-relog" onclick="quickLog(${f.id})">Log</button><button class="fav-remove" onclick="removeFavorite(${f.id})" aria-label="Remove">✕</button></div></div>`).join('');
+  const shown = favorites.slice(0, 10);
+  list.innerHTML=shown.map(f=>`<div class="fav-item"><div class="fav-item-left"><div class="fav-item-name">${esc(f.meal_name)}</div><div class="fav-item-macros">${f.calories} cal · ${f.protein}g P · ${f.carbs}g C · ${f.fat}g F · ${f.fiber||0}g f</div></div><div class="fav-item-actions"><button class="fav-relog" onclick="quickLog(${f.id})">Log</button><button class="fav-remove" onclick="removeFavorite(${f.id})" aria-label="Remove">✕</button></div></div>`).join('');
 }
 
 async function logWeight() {
