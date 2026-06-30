@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Fraunces:opsz,wght@9..144,400;9..144,600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=1.21c">
+  <link rel="stylesheet" href="style.css?v=1.22">
 </head>
 <body>
   <!-- AUTH OVERLAY -->
@@ -125,6 +125,11 @@
         <div class="card-label">Quick log</div>
         <div class="fav-list" id="favList"></div>
       </div>
+      <div class="card">
+        <div class="card-label">Search past meals</div>
+        <input type="text" class="cal-input-field" id="mealSearchInput" placeholder="Search by name..." oninput="searchMeals()" />
+        <div id="searchResults" style="margin-top:10px;"></div>
+      </div>
     </div>
 
     <!-- TODAY TAB -->
@@ -134,7 +139,9 @@
           <button class="date-btn" onclick="changeDate(-1)">‹</button>
           <span class="date-label" id="dateLabel">Today</span>
           <button class="date-btn" onclick="changeDate(1)">›</button>
+          <button class="date-btn" onclick="toggleCalendar()" style="margin-left:8px;font-size:14px;">📅</button>
         </div>
+        <div id="calendarView" style="display:none;margin-bottom:16px;"></div>
         <div class="cal-remaining-bar" id="calRemainingBar">
           <div class="cal-remaining-track">
             <div class="cal-remaining-fill" id="calRemainingFill"></div>
@@ -372,6 +379,11 @@
         <canvas id="weightChart" height="180"></canvas>
         <div class="empty" id="weightEmpty" style="padding:16px;">No weight entries yet. Log your weight on the Log tab.</div>
       </div>
+      <div class="card">
+        <div class="card-label">Estimated TDEE over time</div>
+        <canvas id="tdeeChart" height="180"></canvas>
+        <div class="empty" id="tdeeChartEmpty" style="padding:16px;">Need at least 3 weeks of calorie and weight data.</div>
+      </div>
     </div>
 
   </div>
@@ -424,7 +436,7 @@
     </div>
   </div>
 
-  <script src="app.js?v=1.21c"></script>
+  <script src="app.js?v=1.22"></script>
   <script>
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch(() => {});

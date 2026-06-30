@@ -1281,6 +1281,7 @@ function renderTrends() {
   renderDonut(sum, n);
   renderWeightChart();
   renderCompare();
+  renderTDEEChart();
   // Store dates for chart click navigation
   const dates = days.map(d => d.date);
   if (chartMeta['calChart']) chartMeta['calChart'].dates = dates;
@@ -2158,8 +2159,175 @@ setInterval(async () => {
   }
 }, 45 * 60 * 1000);
 
+// === CALENDAR VIEW ===
+let calendarVisible = false;
+let calendarMonth = new Date().getMonth();
+let calendarYear = new Date().getFullYear();
+
+function toggleCalendar() {
+  calendarVisible = !calendarVisible;
+  const el = document.getElementById('calendarView');
+  if (calendarVisible) {
+    calendarMonth = viewDate.getMonth();
+    calendarYear = viewDate.getFullYear();
+    renderCalendar();
+    el.style.display = '';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+function changeCalMonth(delta) {
+  calendarMonth += delta;
+  if (calendarMonth > 11) { calendarMonth = 0; calendarYear++; }
+  if (calendarMonth < 0) { calendarMonth = 11; calendarYear--; }
+  renderCalendar();
+}
+
+function renderCalendar() {
+  const el = document.getElementById('calendarView');
+  const today = fmtDate(new Date());
+  const selectedDs = fmtDate(viewDate);
+  const firstDay = new Date(calendarYear, calendarMonth, 1).getDay();
+  const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
+  const monthName = new Date(calendarYear, calendarMonth).toLocaleDateString(undefined, {month:'long', year:'numeric'});
+  // Build tracked days set with calorie totals
+  const trackedDays = {};
+  meals.forEach(m => {
+    if (!trackedDays[m.date]) trackedDays[m.date] = 0;
+    trackedDays[m.date] += m.calories;
+  });
+  let html = `<div class="cal-header"><button class="cal-header-btn" onclick="changeCalMonth(-1)">‹</button><span class="cal-header-label">${monthName}</span><button class="cal-header-btn" onclick="changeCalMonth(1)">›</button></div>`;
+  html += '<div class="cal-grid">';
+  ['S','M','T','W','T','F','S'].forEach(d => html += `<div class="cal-dow">${d}</div>`);
+  for (let i = 0; i < firstDay; i++) html += '<div class="cal-day empty"></div>';
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = `${calendarYear}-${String(calendarMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const cal = trackedDays[ds] || 0;
+    let cls = 'cal-day';
+    if (cal > 0 && cal <= goals.cal * 1.05) cls += ' tracked';
+    else if (cal > goals.cal * 1.05) cls += ' over';
+    if (ds === today) cls += ' today';
+    if (ds === selectedDs) cls += ' selected';
+    html += `<div class="${cls}" onclick="selectCalDay('${ds}')">${d}</div>`;
+  }
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function selectCalDay(ds) {
+  viewDate = new Date(ds + 'T12:00:00');
+  renderCalendar();
+  renderToday();
+}
+
+// === SEARCH ===
+function searchMeals() {
+  const query = document.getElementById('mealSearchInput').value.trim().toLowerCase();
+  const container = document.getElementById('searchResults');
+  if (!query || query.length < 2) { container.innerHTML = ''; return; }
+  const results = meals.filter(m => m.meal_name.toLowerCase().includes(query)).slice(0, 20);
+  if (results.length === 0) {
+    container.innerHTML = '<p style="font-size:13px;color:var(--text-3);">No meals found.</p>';
+    return;
+  }
+  // Deduplicate by name, show most recent
+  const seen = new Map();
+  results.forEach(m => {
+    const key = m.meal_name.toLowerCase();
+    if (!seen.has(key)) seen.set(key, []);
+    seen.get(key).push(m);
+  });
+  let html = '';
+  seen.forEach((items, key) => {
+    const m = items[0]; // most recent (meals sorted by date desc)
+    const count = items.length;
+    html += `<div class="search-item">
+      <div class="search-item-left">
+        <div class="search-item-name">${esc(m.meal_name)}</div>
+        <div class="search-item-meta">${m.date} · ${m.protein}g P · ${m.carbs}g C · ${m.fat}g F${count > 1 ? ' · logged '+count+'×' : ''}</div>
+      </div>
+      <span class="search-item-cal">${m.calories}</span>
+      <button class="log-today-btn" onclick="logSearchResult(${m.id})" style="margin-left:8px;">+Today</button>
+    </div>`;
+  });
+  container.innerHTML = html;
+}
+
+async function logSearchResult(id) {
+  const meal = meals.find(m => m.id === id);
+  if (!meal) return;
+  const now = new Date();
+  const mealData = { date:fmtDate(now), time:now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}), type:meal.type, meal_name:meal.meal_name, description:meal.description, calories:meal.calories, protein:meal.protein, carbs:meal.carbs, fat:meal.fat, fiber:meal.fiber||0 };
+  if (supaReady) {
+    setSyncStatus('busy','saving…');
+    try {
+      const rows = await supa('meals','POST',{body:{date:mealData.date,time:mealData.time,meal_type:mealData.type,meal_name:mealData.meal_name,description:mealData.description,calories:mealData.calories,protein:mealData.protein,carbs:mealData.carbs,fat:mealData.fat,fiber:mealData.fiber}});
+      mealData.id = rows[0].id;
+      setSyncStatus('ok','synced');
+    } catch(e) { mealData.id = Date.now(); setSyncStatus('err','save failed'); showQuickToast('⚠ Save failed'); }
+  } else { mealData.id = Date.now(); }
+  meals.unshift(mealData);
+  showQuickToast(esc(meal.meal_name) + ' logged to today');
+}
+
+// === TDEE OVER TIME CHART ===
+function renderTDEEChart() {
+  const chart = document.getElementById('tdeeChart');
+  const empty = document.getElementById('tdeeChartEmpty');
+  // Calculate rolling 14-day TDEE for each day going back up to 90 days
+  const tdeePoints = [];
+  const cs = getComputedStyle(document.documentElement);
+  for (let i = 90; i >= 0; i--) {
+    const refDate = new Date(); refDate.setDate(refDate.getDate() - i);
+    const refDs = fmtDate(refDate);
+    // 14-day lookback from this date
+    const days14 = [];
+    for (let j = 13; j >= 0; j--) {
+      const d = new Date(refDate); d.setDate(d.getDate() - j);
+      const ds = fmtDate(d);
+      const dm = meals.filter(m => m.date === ds);
+      const dayEx = exerciseLog.filter(e => e.date === ds);
+      const cal = dm.reduce((a,m) => a + m.calories, 0);
+      const ex = dayEx.reduce((a,e) => a + e.calories_burned, 0);
+      if (cal > 0) days14.push({ cal, ex });
+    }
+    if (days14.length < 7) continue;
+    // Weight regression for this window
+    const cutoff = new Date(refDate); cutoff.setDate(cutoff.getDate() - 15);
+    const recentW = weightLog.filter(w => {
+      const wd = new Date(w.date + 'T12:00:00');
+      return wd >= cutoff && wd <= refDate;
+    });
+    if (recentW.length < 2) continue;
+    const startDate = new Date(recentW[0].date + 'T12:00:00');
+    const points = recentW.map(w => ({ x: (new Date(w.date+'T12:00:00')-startDate)/(1000*60*60*24), y: w.value }));
+    const n2 = points.length;
+    const sumX = points.reduce((a,p) => a+p.x, 0), sumY = points.reduce((a,p) => a+p.y, 0);
+    const sumXY = points.reduce((a,p) => a+p.x*p.y, 0), sumX2 = points.reduce((a,p) => a+p.x*p.x, 0);
+    const slope = (n2*sumXY - sumX*sumY) / (n2*sumX2 - sumX*sumX);
+    if (!isFinite(slope) || isNaN(slope)) continue;
+    const avgIntake = days14.reduce((a,d) => a + d.cal, 0) / days14.length;
+    const avgExercise = days14.reduce((a,d) => a + d.ex, 0) / days14.length;
+    const tdee = Math.round(avgIntake - avgExercise - (slope * 3500));
+    if (tdee >= 500 && tdee <= 8000) {
+      tdeePoints.push({ date: refDs, label: refDate.toLocaleDateString(undefined,{month:'short',day:'numeric'}), tdee });
+    }
+  }
+  if (tdeePoints.length < 3) {
+    chart.style.display = 'none'; empty.style.display = ''; return;
+  }
+  chart.style.display = ''; empty.style.display = 'none';
+  const labels = tdeePoints.map(p => p.label);
+  const vals = tdeePoints.map(p => p.tdee);
+  const minV = Math.min(...vals);
+  const maxV = Math.max(...vals);
+  drawChart('tdeeChart',[{data:vals,color:'#22C55E'}],labels,null,Math.floor(minV-100),Math.ceil(maxV+100));
+  if (chartMeta['tdeeChart']) chartMeta['tdeeChart'].dates = tdeePoints.map(p => p.date);
+}
+
 // Chart click navigation
-['calChart','macroChart','macroPctChart','weightChart'].forEach(id => {
+['calChart','macroChart','macroPctChart','weightChart','tdeeChart'].forEach(id => {
   const el = document.getElementById(id);
   if (!el) return;
   el.addEventListener('click', e => {
