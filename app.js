@@ -1680,22 +1680,24 @@ function renderGoalWeight() {
   const targetDate = new Date(goalDate + 'T12:00:00');
   const today = new Date();
   const daysLeft = Math.max(1, Math.round((targetDate - today) / (1000*60*60*24)));
+  const weeksLeft = Math.round(daysLeft / 7 * 10) / 10;
   const lbsToChange = currentW - goalWeight;
   const lbsPerWeek = (lbsToChange / daysLeft) * 7;
   const dailyDeficit = Math.round((lbsToChange * 3500) / daysLeft);
+  const weeklyDeficit = dailyDeficit * 7;
   let advice = '';
   if (tdee) {
     const targetCal = tdee - dailyDeficit;
     if (lbsToChange > 0) {
-      advice = `Eat ~<strong>${targetCal}</strong> cal/day to reach <strong>${goalWeight} lbs</strong> by ${targetDate.toLocaleDateString(undefined,{month:'short',day:'numeric'})} (${Math.abs(lbsPerWeek).toFixed(1)} lbs/wk)`;
+      advice = `Eat ~<strong>${targetCal}</strong> cal/day to reach <strong>${goalWeight} lbs</strong> by ${targetDate.toLocaleDateString(undefined,{month:'short',day:'numeric'})} · ${weeksLeft} wks · ${Math.abs(lbsPerWeek).toFixed(1)} lbs/wk · ${Math.abs(dailyDeficit)} cal/day deficit`;
     } else if (lbsToChange < 0) {
-      advice = `Eat ~<strong>${targetCal}</strong> cal/day to reach <strong>${goalWeight} lbs</strong> by ${targetDate.toLocaleDateString(undefined,{month:'short',day:'numeric'})} (+${Math.abs(lbsPerWeek).toFixed(1)} lbs/wk)`;
+      advice = `Eat ~<strong>${targetCal}</strong> cal/day to reach <strong>${goalWeight} lbs</strong> by ${targetDate.toLocaleDateString(undefined,{month:'short',day:'numeric'})} · ${weeksLeft} wks · +${Math.abs(lbsPerWeek).toFixed(1)} lbs/wk · +${Math.abs(dailyDeficit)} cal/day surplus`;
     } else {
       advice = `You're at your goal weight! Maintain at ~<strong>${tdee}</strong> cal/day`;
     }
     if (Math.abs(lbsPerWeek) > 2) advice += ' <span style="color:var(--coral);">⚠ Aggressive pace</span>';
   } else {
-    advice = `${Math.abs(lbsToChange).toFixed(1)} lbs to ${lbsToChange > 0 ? 'lose' : 'gain'} in ${daysLeft} days (${Math.abs(lbsPerWeek).toFixed(1)} lbs/wk). Need more data for calorie target.`;
+    advice = `${Math.abs(lbsToChange).toFixed(1)} lbs to ${lbsToChange > 0 ? 'lose' : 'gain'} · ${weeksLeft} wks · ${Math.abs(lbsPerWeek).toFixed(1)} lbs/wk. Need more data for calorie target.`;
   }
   document.getElementById('goalWeightAdvice').innerHTML = advice;
   row.style.display = '';
@@ -1709,8 +1711,15 @@ function renderGoalWeightSummary() {
   const lbsToChange = currentW - goalWeight;
   const targetDate = new Date(goalDate + 'T12:00:00');
   const daysLeft = Math.max(1, Math.round((targetDate - new Date()) / (1000*60*60*24)));
+  const weeksLeft = Math.round(daysLeft / 7 * 10) / 10;
+  const dailyDeficit = Math.round((lbsToChange * 3500) / daysLeft);
   const direction = lbsToChange > 0 ? 'lose' : 'gain';
-  el.innerHTML = `Current: <strong>${currentW} lbs</strong> → Goal: <strong>${goalWeight} lbs</strong> (${Math.abs(lbsToChange).toFixed(1)} lbs to ${direction}, ${daysLeft} days left)`;
+  const tdee = calculateTDEE();
+  let html = `Current: <strong>${currentW} lbs</strong> → Goal: <strong>${goalWeight} lbs</strong> (${Math.abs(lbsToChange).toFixed(1)} lbs to ${direction}, ${weeksLeft} weeks)`;
+  if (tdee) {
+    html += `<br>TDEE: ${tdee} cal/day · Required ${lbsToChange > 0 ? 'deficit' : 'surplus'}: ${Math.abs(dailyDeficit)} cal/day (${Math.abs(dailyDeficit*7)} cal/wk)`;
+  }
+  el.innerHTML = html;
   el.style.display = '';
 }
 
