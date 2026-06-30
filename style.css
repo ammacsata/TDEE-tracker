@@ -374,6 +374,19 @@ body {
   margin-top: 10px;
   font-style: italic;
 }
+.meal-analysis {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--accent);
+}
+.meal-analysis-text {
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.5;
+  margin: 0;
+}
 
 /* Calibration note inline */
 .cal-toggle {

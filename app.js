@@ -12,6 +12,7 @@ let supaReady = false, undoStack = null, undoTimer = null;
 let editingMealId = null, editForDate = null, editReplacingId = null;
 let currentUser = null, authToken = null;
 let compareMode = 'week', trendRange = 7;
+let goalWeight = null, goalDate = null;
 
 // ─── SUPABASE HELPERS ───
 function supaUrl() { return SUPA_URL; }
@@ -246,12 +247,15 @@ async function connectSupabase() {
       goals.carbs = s.goal_carbs || 200; goals.fat = s.goal_fat || 65;
       goals.fiber = s.goal_fiber || 25;
       if (s.theme) loadThemeFromSupabase(s.theme);
+      if (s.goal_weight) { goalWeight = s.goal_weight; document.getElementById('goalWeight').value = goalWeight; }
+      if (s.goal_date) { goalDate = s.goal_date; document.getElementById('goalDate').value = goalDate; }
       document.getElementById('goalCal').value = goals.cal;
       document.getElementById('goalProt').value = goals.prot;
       document.getElementById('goalCarbs').value = goals.carbs;
       document.getElementById('goalFat').value = goals.fat;
       document.getElementById('goalFiber').value = goals.fiber;
       updateGoalDisplay();
+      renderGoalWeightSummary();
     }
     const mealRows = await supa('meals', 'GET', { query: 'select=*&order=date.desc,time.desc' });
     meals = mealRows.map(r => ({ id:r.id, date:r.date, time:r.time, type:r.meal_type, meal_name:r.meal_name, description:r.description, calories:r.calories, protein:r.protein, carbs:r.carbs, fat:r.fat, fiber:r.fiber||0 }));
@@ -521,6 +525,12 @@ function showPreview(items) {
   document.getElementById('calInline').classList.remove('show');
   document.getElementById('calToggleLabel').textContent = 'Add a calibration note';
   document.getElementById('previewCard').classList.add('show');
+  // Get meal analysis
+  document.getElementById('mealAnalysis').style.display = 'none';
+  const today = fmtDate(new Date());
+  const todayMeals = meals.filter(m => m.date === today);
+  const todayTotals = todayMeals.reduce((a,m) => ({cal:a.cal+m.calories,prot:a.prot+m.protein,carbs:a.carbs+m.carbs,fat:a.fat+m.fat,fiber:a.fiber+(m.fiber||0)}),{cal:0,prot:0,carbs:0,fat:0,fiber:0});
+  getMealAnalysis(pendingMeals, todayTotals);
 }
 
 async function confirmLog() {
@@ -959,6 +969,7 @@ function renderToday() {
   else { exRow.style.display = 'none'; }
   // TDEE estimate
   renderTDEE();
+  renderGoalWeight();
   // Calorie remaining bar
   const remaining = goals.cal - netCal;
   const pctUsed = goals.cal > 0 ? Math.min(Math.round((netCal / goals.cal) * 100), 100) : 0;
@@ -1097,7 +1108,7 @@ function getDayTotals(numDays) {
 let chartMeta = {};
 let weightRange = 30;
 
-function drawChart(canvasId, datasets, labels, goalLine, minVal, maxValOverride) {
+function drawChart(canvasId, datasets, labels, goalLine, minVal, maxValOverride, secondLine) {
   const canvas = document.getElementById(canvasId);
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
@@ -1111,6 +1122,7 @@ function drawChart(canvasId, datasets, labels, goalLine, minVal, maxValOverride)
   const chartW=w-padL-padR, chartH=h-padT-padB;
   const allVals = datasets.flatMap(d=>d.data).filter(v=>v>0);
   if (goalLine) allVals.push(goalLine);
+  if (secondLine) allVals.push(secondLine);
   const floor = minVal != null ? minVal : 0;
   const maxVal = maxValOverride != null ? maxValOverride : Math.max(...allVals,floor+1)*1.1;
   const range = maxVal - floor;
@@ -1131,6 +1143,15 @@ function drawChart(canvasId, datasets, labels, goalLine, minVal, maxValOverride)
     ctx.moveTo(padL,gy); ctx.lineTo(w-padR,gy); ctx.stroke();
     ctx.setLineDash([]); ctx.fillStyle=textColor; ctx.textAlign='left';
     ctx.fillText('goal',w-padR+2,gy+4); ctx.textAlign='right';
+  }
+  if (secondLine) {
+    const sy=padT+chartH-((secondLine-floor)/range)*chartH;
+    ctx.beginPath(); ctx.setLineDash([6,3]);
+    ctx.strokeStyle='#22C55E';
+    ctx.lineWidth=1.5;
+    ctx.moveTo(padL,sy); ctx.lineTo(w-padR,sy); ctx.stroke();
+    ctx.setLineDash([]); ctx.fillStyle='#22C55E'; ctx.textAlign='left';
+    ctx.fillText('TDEE',w-padR+2,sy-6); ctx.textAlign='right'; ctx.fillStyle=textColor;
   }
   ctx.textAlign='center'; ctx.fillStyle=textColor;
   const step = labels.length>1 ? chartW/(labels.length-1) : 0;
@@ -1224,10 +1245,11 @@ function renderTrends() {
     const exBurned = dayEx.reduce((a,e) => a + e.calories_burned, 0);
     return d.cal > 0 ? d.cal - exBurned : 0;
   });
+  const tdeeLine = calculateTDEE();
   drawChart('calChart',[
     {data:days.map(d=>d.cal),color:col('--blue')||'#2B6CB0'},
     {data:netCalData,color:'#22C55E'}
-  ],labels,goals.cal);
+  ],labels,goals.cal,null,null,tdeeLine);
   drawChart('macroChart',[
     {data:days.map(d=>d.prot),color:col('--accent')||'#2E6B3E'},
     {data:days.map(d=>d.carbs),color:col('--amber')||'#B7791F'},
@@ -1604,9 +1626,123 @@ function renderTDEE() {
   const avgIntake = days14.reduce((a,d) => a + d.cal, 0) / days14.length;
   const avgExercise = days14.reduce((a,d) => a + d.ex, 0) / days14.length;
   const tdee = Math.round(avgIntake - avgExercise - (slope * 3500));
-  if (tdee < 500 || tdee > 8000) { tdeeRow.style.display = 'none'; return; } // sanity check
+  if (tdee < 500 || tdee > 8000) { tdeeRow.style.display = 'none'; return null; } // sanity check
   document.getElementById('tdeeValue').textContent = tdee;
   tdeeRow.style.display = '';
+  return tdee;
+}
+
+function calculateTDEE() {
+  if (weightLog.length < 2) return null;
+  const days14 = [];
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    const ds = fmtDate(d);
+    const dm = meals.filter(m => m.date === ds);
+    const dayEx = exerciseLog.filter(e => e.date === ds);
+    const cal = dm.reduce((a,m) => a + m.calories, 0);
+    const ex = dayEx.reduce((a,e) => a + e.calories_burned, 0);
+    if (cal > 0) days14.push({ cal, ex });
+  }
+  if (days14.length < 7) return null;
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 15);
+  const recentWeight = weightLog.filter(w => new Date(w.date + 'T12:00:00') >= cutoff);
+  if (recentWeight.length < 2) return null;
+  const startDate = new Date(recentWeight[0].date + 'T12:00:00');
+  const points = recentWeight.map(w => ({ x: (new Date(w.date+'T12:00:00')-startDate)/(1000*60*60*24), y: w.value }));
+  const n2 = points.length;
+  const sumX = points.reduce((a,p) => a+p.x, 0), sumY = points.reduce((a,p) => a+p.y, 0);
+  const sumXY = points.reduce((a,p) => a+p.x*p.y, 0), sumX2 = points.reduce((a,p) => a+p.x*p.x, 0);
+  const slope = (n2*sumXY - sumX*sumY) / (n2*sumX2 - sumX*sumX);
+  if (!isFinite(slope) || isNaN(slope)) return null;
+  const avgIntake = days14.reduce((a,d) => a + d.cal, 0) / days14.length;
+  const avgExercise = days14.reduce((a,d) => a + d.ex, 0) / days14.length;
+  const tdee = Math.round(avgIntake - avgExercise - (slope * 3500));
+  return (tdee >= 500 && tdee <= 8000) ? tdee : null;
+}
+
+async function saveGoalWeight() {
+  goalWeight = parseFloat(document.getElementById('goalWeight').value) || null;
+  goalDate = document.getElementById('goalDate').value || null;
+  if (supaReady && currentUser) {
+    try { await supa('settings','PATCH',{query:'user_id=eq.'+currentUser.id,body:{goal_weight:goalWeight,goal_date:goalDate}}); } catch(e){}
+  }
+  renderGoalWeight();
+  renderGoalWeightSummary();
+}
+
+function renderGoalWeight() {
+  const row = document.getElementById('goalWeightRow');
+  if (!goalWeight || !goalDate) { row.style.display = 'none'; return; }
+  const currentW = weightLog.length > 0 ? weightLog[weightLog.length - 1].value : null;
+  if (!currentW) { row.style.display = 'none'; return; }
+  const tdee = calculateTDEE();
+  const targetDate = new Date(goalDate + 'T12:00:00');
+  const today = new Date();
+  const daysLeft = Math.max(1, Math.round((targetDate - today) / (1000*60*60*24)));
+  const lbsToChange = currentW - goalWeight;
+  const lbsPerWeek = (lbsToChange / daysLeft) * 7;
+  const dailyDeficit = Math.round((lbsToChange * 3500) / daysLeft);
+  let advice = '';
+  if (tdee) {
+    const targetCal = tdee - dailyDeficit;
+    if (lbsToChange > 0) {
+      advice = `Eat ~<strong>${targetCal}</strong> cal/day to reach <strong>${goalWeight} lbs</strong> by ${targetDate.toLocaleDateString(undefined,{month:'short',day:'numeric'})} (${Math.abs(lbsPerWeek).toFixed(1)} lbs/wk)`;
+    } else if (lbsToChange < 0) {
+      advice = `Eat ~<strong>${targetCal}</strong> cal/day to reach <strong>${goalWeight} lbs</strong> by ${targetDate.toLocaleDateString(undefined,{month:'short',day:'numeric'})} (+${Math.abs(lbsPerWeek).toFixed(1)} lbs/wk)`;
+    } else {
+      advice = `You're at your goal weight! Maintain at ~<strong>${tdee}</strong> cal/day`;
+    }
+    if (Math.abs(lbsPerWeek) > 2) advice += ' <span style="color:var(--coral);">⚠ Aggressive pace</span>';
+  } else {
+    advice = `${Math.abs(lbsToChange).toFixed(1)} lbs to ${lbsToChange > 0 ? 'lose' : 'gain'} in ${daysLeft} days (${Math.abs(lbsPerWeek).toFixed(1)} lbs/wk). Need more data for calorie target.`;
+  }
+  document.getElementById('goalWeightAdvice').innerHTML = advice;
+  row.style.display = '';
+}
+
+function renderGoalWeightSummary() {
+  const el = document.getElementById('goalWeightSummary');
+  if (!goalWeight || !goalDate) { el.style.display = 'none'; return; }
+  const currentW = weightLog.length > 0 ? weightLog[weightLog.length - 1].value : null;
+  if (!currentW) { el.textContent = 'Log your weight to see progress.'; el.style.display = ''; return; }
+  const lbsToChange = currentW - goalWeight;
+  const targetDate = new Date(goalDate + 'T12:00:00');
+  const daysLeft = Math.max(1, Math.round((targetDate - new Date()) / (1000*60*60*24)));
+  const direction = lbsToChange > 0 ? 'lose' : 'gain';
+  el.innerHTML = `Current: <strong>${currentW} lbs</strong> → Goal: <strong>${goalWeight} lbs</strong> (${Math.abs(lbsToChange).toFixed(1)} lbs to ${direction}, ${daysLeft} days left)`;
+  el.style.display = '';
+}
+
+async function getMealAnalysis(mealItems, todayTotals) {
+  const key = document.getElementById('apiKey').value.trim();
+  if (!key) return;
+  const el = document.getElementById('mealAnalysis');
+  const textEl = document.getElementById('mealAnalysisText');
+  el.style.display = 'none';
+  const mealSummary = mealItems.map(m => `${m.meal_name}: ${m.calories} cal, ${m.protein}g P, ${m.carbs}g C, ${m.fat}g F, ${m.fiber}g fiber`).join('; ');
+  const totalMealCal = mealItems.reduce((a,m) => a + m.calories, 0);
+  const totalMealProt = mealItems.reduce((a,m) => a + m.protein, 0);
+  const totalMealCarbs = mealItems.reduce((a,m) => a + m.carbs, 0);
+  const totalMealFat = mealItems.reduce((a,m) => a + m.fat, 0);
+  const totalMealFiber = mealItems.reduce((a,m) => a + (m.fiber||0), 0);
+  const afterCal = todayTotals.cal + totalMealCal;
+  const afterProt = todayTotals.prot + totalMealProt;
+  const afterCarbs = todayTotals.carbs + totalMealCarbs;
+  const afterFat = todayTotals.fat + totalMealFat;
+  const afterFiber = todayTotals.fiber + totalMealFiber;
+  try {
+    const data = await callClaude(key, {
+      model: 'claude-sonnet-4-6', max_tokens: 200,
+      system: `You are a concise nutrition coach. Given a meal, the user's daily totals after this meal, and their goals, give 1-2 sentences of specific actionable advice. Focus on what to DO — suggest swaps, flag concerns, or affirm good choices. Be direct and practical, not generic. No stats unless they support the advice. Do not repeat the meal description.`,
+      messages: [{ role: 'user', content: `Meal: ${mealSummary}\n\nAfter logging this meal:\nCalories: ${afterCal} / ${goals.cal} goal\nProtein: ${afterProt}g / ${goals.prot}g goal\nCarbs: ${afterCarbs}g / ${goals.carbs}g goal\nFat: ${afterFat}g / ${goals.fat}g goal\nFiber: ${afterFiber}g / ${goals.fiber}g goal\n\nGive 1-2 sentences of actionable advice.` }]
+    });
+    const text = data.content.filter(b=>b.type==='text').map(b=>b.text).join('');
+    if (text.trim()) {
+      textEl.textContent = text.trim();
+      el.style.display = '';
+    }
+  } catch(e) { /* silently skip analysis if it fails */ }
 }
 
 function exportPDF() {
