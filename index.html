@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Fraunces:opsz,wght@9..144,400;9..144,600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=1.21b">
+  <link rel="stylesheet" href="style.css?v=1.21c">
 </head>
 <body>
   <!-- AUTH OVERLAY -->
@@ -242,9 +242,25 @@
       </div>
       <div class="card">
         <div class="card-label">Goal weight</div>
-        <div class="goals-grid" style="grid-template-columns:1fr 1fr;">
-          <div class="goal-cell"><span class="goal-label">Target (lbs)</span><input class="goal-input" type="number" id="goalWeight" placeholder="165" onchange="saveGoalWeight()" /></div>
+        <div class="goal-cell" style="margin-bottom:10px;"><span class="goal-label">Target (lbs)</span><input class="goal-input" type="number" id="goalWeight" placeholder="165" onchange="saveGoalWeight()" /></div>
+        <div class="goal-mode-toggle" style="display:flex;gap:4px;margin-bottom:10px;">
+          <button class="range-btn active" id="goalModeDate" onclick="setGoalMode('date')">By date</button>
+          <button class="range-btn" id="goalModeRate" onclick="setGoalMode('rate')">By rate</button>
+        </div>
+        <div id="goalByDate">
           <div class="goal-cell"><span class="goal-label">Target date</span><input class="goal-input" type="date" id="goalDate" onchange="saveGoalWeight()" /></div>
+        </div>
+        <div id="goalByRate" style="display:none;">
+          <div class="goal-cell"><span class="goal-label">Rate (lbs/week)</span>
+            <select class="goal-input" id="goalRate" onchange="saveGoalWeight()" style="width:120px;">
+              <option value="0.25">0.25</option>
+              <option value="0.5">0.5</option>
+              <option value="0.75">0.75</option>
+              <option value="1.0" selected>1.0</option>
+              <option value="1.25">1.25</option>
+              <option value="1.5">1.5</option>
+            </select>
+          </div>
         </div>
         <div id="goalWeightSummary" style="margin-top:10px;font-size:13px;color:var(--text-2);display:none;"></div>
       </div>
@@ -408,7 +424,7 @@
     </div>
   </div>
 
-  <script src="app.js?v=1.21b"></script>
+  <script src="app.js?v=1.21c"></script>
   <script>
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch(() => {});

@@ -12,7 +12,7 @@ let supaReady = false, undoStack = null, undoTimer = null;
 let editingMealId = null, editForDate = null, editReplacingId = null;
 let currentUser = null, authToken = null;
 let compareMode = 'week', trendRange = 7;
-let goalWeight = null, goalDate = null;
+let goalWeight = null, goalDate = null, goalMode_ = 'date', goalRate = 1.0;
 
 // ─── SUPABASE HELPERS ───
 function supaUrl() { return SUPA_URL; }
@@ -1661,9 +1661,32 @@ function calculateTDEE() {
   return (tdee >= 500 && tdee <= 8000) ? tdee : null;
 }
 
+function setGoalMode(mode) {
+  goalMode_ = mode;
+  document.getElementById('goalModeDate').classList.toggle('active', mode === 'date');
+  document.getElementById('goalModeRate').classList.toggle('active', mode === 'rate');
+  document.getElementById('goalByDate').style.display = mode === 'date' ? '' : 'none';
+  document.getElementById('goalByRate').style.display = mode === 'rate' ? '' : 'none';
+  saveGoalWeight();
+}
+
 async function saveGoalWeight() {
   goalWeight = parseFloat(document.getElementById('goalWeight').value) || null;
-  goalDate = document.getElementById('goalDate').value || null;
+  if (goalMode_ === 'rate') {
+    goalRate = parseFloat(document.getElementById('goalRate').value) || 1.0;
+    // Calculate target date from rate
+    const currentW = weightLog.length > 0 ? weightLog[weightLog.length - 1].value : null;
+    if (goalWeight && currentW && goalRate > 0) {
+      const lbsToChange = Math.abs(currentW - goalWeight);
+      const weeksNeeded = lbsToChange / goalRate;
+      const target = new Date();
+      target.setDate(target.getDate() + Math.round(weeksNeeded * 7));
+      goalDate = fmtDate(target);
+      document.getElementById('goalDate').value = goalDate;
+    }
+  } else {
+    goalDate = document.getElementById('goalDate').value || null;
+  }
   if (supaReady && currentUser) {
     try { await supa('settings','PATCH',{query:'user_id=eq.'+currentUser.id,body:{goal_weight:goalWeight,goal_date:goalDate}}); } catch(e){}
   }
@@ -1738,12 +1761,13 @@ function renderGoalWeightSummary() {
   const targetDate = new Date(goalDate + 'T12:00:00');
   const daysLeft = Math.max(1, Math.round((targetDate - new Date()) / (1000*60*60*24)));
   const weeksLeft = Math.round(daysLeft / 7 * 10) / 10;
-  const dailyDeficit = Math.round((lbsToChange * 3500) / daysLeft);
+  const lbsPerWeek = Math.abs((lbsToChange / daysLeft) * 7);
+  const dailyDeficit = Math.round(Math.abs(lbsToChange * 3500) / daysLeft);
   const direction = lbsToChange > 0 ? 'lose' : 'gain';
   const tdee = calculateTDEE();
-  let html = `Current: <strong>${currentW} lbs</strong> → Goal: <strong>${goalWeight} lbs</strong> (${Math.abs(lbsToChange).toFixed(1)} lbs to ${direction}, ${weeksLeft} weeks)`;
+  let html = `Current: <strong>${currentW} lbs</strong> → Goal: <strong>${goalWeight} lbs</strong><br>${Math.abs(lbsToChange).toFixed(1)} lbs to ${direction} · ${weeksLeft} weeks · ${lbsPerWeek.toFixed(2)} lbs/wk`;
   if (tdee) {
-    html += `<br>TDEE: ${tdee} cal/day · Required ${lbsToChange > 0 ? 'deficit' : 'surplus'}: ${Math.abs(dailyDeficit)} cal/day (${Math.abs(dailyDeficit*7)} cal/wk)`;
+    html += `<br>TDEE: ${tdee} cal/day · ${lbsToChange > 0 ? 'Deficit' : 'Surplus'}: ${dailyDeficit} cal/day (${(dailyDeficit*7).toLocaleString()} cal/wk)`;
   }
   el.innerHTML = html;
   el.style.display = '';
