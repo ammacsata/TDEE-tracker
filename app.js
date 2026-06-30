@@ -1093,6 +1093,15 @@ document.addEventListener('touchend', () => {
 
 function setRange(days) { trendRange = days; document.querySelectorAll('.range-btn').forEach(b => b.classList.toggle('active', parseInt(b.textContent)===days)); renderTrends(); }
 
+let currentTrendSub = 'overview';
+function switchTrendSub(name) {
+  currentTrendSub = name;
+  document.querySelectorAll('#trendSubTabs .sub-tab').forEach(b => b.classList.toggle('active', b.textContent.toLowerCase() === name));
+  document.querySelectorAll('.trend-sub').forEach(p => p.classList.toggle('active', p.id === 'trend-' + name));
+  // Re-render charts in the active sub since hidden canvases have 0 width
+  setTimeout(() => renderTrends(), 50);
+}
+
 function getDayTotals(numDays) {
   const days = [];
   for (let i = numDays-1; i >= 0; i--) {
@@ -1239,54 +1248,66 @@ function renderTrends() {
   const days = getDayTotals(trendRange), labels = days.map(d=>d.label);
   const cs = getComputedStyle(document.documentElement);
   const col = n => cs.getPropertyValue(n).trim();
-  // Calculate net calories (consumed minus exercise)
-  const netCalData = days.map(d => {
-    const dayEx = exerciseLog.filter(e => e.date === d.date);
-    const exBurned = dayEx.reduce((a,e) => a + e.calories_burned, 0);
-    return d.cal > 0 ? d.cal - exBurned : 0;
-  });
-  const tdeeLine = calculateTDEE();
-  drawChart('calChart',[
-    {data:days.map(d=>d.cal),color:col('--blue')||'#2B6CB0'},
-    {data:netCalData,color:'#22C55E'}
-  ],labels,goals.cal,null,null,tdeeLine);
-  drawChart('macroChart',[
-    {data:days.map(d=>d.prot),color:col('--accent')||'#2E6B3E'},
-    {data:days.map(d=>d.carbs),color:col('--amber')||'#B7791F'},
-    {data:days.map(d=>d.fat),color:col('--coral')||'#C53D2F'},
-    {data:days.map(d=>d.fiber),color:col('--purple')||'#A855F7'}
-  ],labels,null);
-  // Macro percentage of target chart (grouped bars)
-  const pctData = days.map(d => ({
-    prot: goals.prot > 0 ? Math.round((d.prot/goals.prot)*100) : 0,
-    carbs: goals.carbs > 0 ? Math.round((d.carbs/goals.carbs)*100) : 0,
-    fat: goals.fat > 0 ? Math.round((d.fat/goals.fat)*100) : 0,
-    fiber: goals.fiber > 0 ? Math.round((d.fiber/goals.fiber)*100) : 0
-  }));
-  drawBarChart('macroPctChart', [
-    {data:pctData.map(d=>d.prot),color:col('--accent')||'#2E6B3E',label:'P'},
-    {data:pctData.map(d=>d.carbs),color:col('--amber')||'#B7791F',label:'C'},
-    {data:pctData.map(d=>d.fat),color:col('--coral')||'#C53D2F',label:'F'},
-    {data:pctData.map(d=>d.fiber),color:col('--purple')||'#A855F7',label:'f'}
-  ], labels, 100);
+  const sub = currentTrendSub;
   const dwd=days.filter(d=>d.cal>0), n=dwd.length||1;
   const sum=dwd.reduce((a,d)=>({cal:a.cal+d.cal,prot:a.prot+d.prot,carbs:a.carbs+d.carbs,fat:a.fat+d.fat,fiber:a.fiber+d.fiber}),{cal:0,prot:0,carbs:0,fat:0,fiber:0});
+  // Always update text-based elements
   document.getElementById('avgCal').textContent=Math.round(sum.cal/n);
   document.getElementById('avgProt').textContent=Math.round(sum.prot/n);
   document.getElementById('avgCarbs').textContent=Math.round(sum.carbs/n);
   document.getElementById('avgFat').textContent=Math.round(sum.fat/n);
   document.getElementById('avgFiber').textContent=Math.round(sum.fiber/n);
   document.getElementById('avgLabel').textContent='Daily averages ('+trendRange+'d)';
-  renderSummary(days, dwd, sum, n);
-  renderDonut(sum, n);
-  renderWeightChart();
-  renderCompare();
-  renderTDEEChart();
-  // Store dates for chart click navigation
-  const dates = days.map(d => d.date);
-  if (chartMeta['calChart']) chartMeta['calChart'].dates = dates;
-  if (chartMeta['macroChart']) chartMeta['macroChart'].dates = dates;
-  if (chartMeta['macroPctChart']) chartMeta['macroPctChart'].dates = dates;
+  // Overview
+  if (sub === 'overview') {
+    renderSummary(days, dwd, sum, n);
+    renderDonut(sum, n);
+    renderCompare();
+  }
+  // Calories
+  if (sub === 'calories') {
+    const netCalData = days.map(d => {
+      const dayEx = exerciseLog.filter(e => e.date === d.date);
+      const exBurned = dayEx.reduce((a,e) => a + e.calories_burned, 0);
+      return d.cal > 0 ? d.cal - exBurned : 0;
+    });
+    const tdeeLine = calculateTDEE();
+    drawChart('calChart',[
+      {data:days.map(d=>d.cal),color:col('--blue')||'#2B6CB0'},
+      {data:netCalData,color:'#22C55E'}
+    ],labels,goals.cal,null,null,tdeeLine);
+    const dates = days.map(d => d.date);
+    if (chartMeta['calChart']) chartMeta['calChart'].dates = dates;
+  }
+  // Macros
+  if (sub === 'macros') {
+    drawChart('macroChart',[
+      {data:days.map(d=>d.prot),color:col('--accent')||'#2E6B3E'},
+      {data:days.map(d=>d.carbs),color:col('--amber')||'#B7791F'},
+      {data:days.map(d=>d.fat),color:col('--coral')||'#C53D2F'},
+      {data:days.map(d=>d.fiber),color:col('--purple')||'#A855F7'}
+    ],labels,null);
+    const pctData = days.map(d => ({
+      prot: goals.prot > 0 ? Math.round((d.prot/goals.prot)*100) : 0,
+      carbs: goals.carbs > 0 ? Math.round((d.carbs/goals.carbs)*100) : 0,
+      fat: goals.fat > 0 ? Math.round((d.fat/goals.fat)*100) : 0,
+      fiber: goals.fiber > 0 ? Math.round((d.fiber/goals.fiber)*100) : 0
+    }));
+    drawBarChart('macroPctChart', [
+      {data:pctData.map(d=>d.prot),color:col('--accent')||'#2E6B3E',label:'P'},
+      {data:pctData.map(d=>d.carbs),color:col('--amber')||'#B7791F',label:'C'},
+      {data:pctData.map(d=>d.fat),color:col('--coral')||'#C53D2F',label:'F'},
+      {data:pctData.map(d=>d.fiber),color:col('--purple')||'#A855F7',label:'f'}
+    ], labels, 100);
+    const dates = days.map(d => d.date);
+    if (chartMeta['macroChart']) chartMeta['macroChart'].dates = dates;
+    if (chartMeta['macroPctChart']) chartMeta['macroPctChart'].dates = dates;
+  }
+  // Weight
+  if (sub === 'weight') {
+    renderWeightChart();
+    renderTDEEChart();
+  }
 }
 
 function setCompare(mode) {
