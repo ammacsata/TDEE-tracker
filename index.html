@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Fraunces:opsz,wght@9..144,400;9..144,600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=1.22b">
+  <link rel="stylesheet" href="style.css?v=1.22d">
 </head>
 <body>
   <!-- AUTH OVERLAY -->
@@ -123,7 +123,10 @@
       </div>
       <div class="card">
         <div class="card-label">Search past meals</div>
-        <input type="text" class="cal-input-field" id="mealSearchInput" placeholder="Search by name..." oninput="searchMeals()" />
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="text" class="cal-input-field" id="mealSearchInput" placeholder="Search by name..." oninput="searchMeals()" style="flex:1;" />
+          <button class="del-btn" onclick="clearSearch()" style="font-size:16px;" aria-label="Clear search">✕</button>
+        </div>
         <div id="searchResults" style="margin-top:10px;"></div>
       </div>
       <div class="card" id="favoritesCard" style="display:none;">
@@ -400,7 +403,15 @@
           <div class="empty" id="weightEmpty" style="padding:16px;">No weight entries yet. Log your weight on the Log tab.</div>
         </div>
         <div class="card">
-          <div class="card-label">Estimated TDEE over time</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+            <div class="card-label" style="margin-bottom:0;">Estimated TDEE</div>
+            <div class="range-toggle" id="tdeeRangeToggle">
+              <button class="range-btn" onclick="setTDEERange(30)">30d</button>
+              <button class="range-btn active" onclick="setTDEERange(90)">3m</button>
+              <button class="range-btn" onclick="setTDEERange(180)">6m</button>
+              <button class="range-btn" onclick="setTDEERange(0)">All</button>
+            </div>
+          </div>
           <canvas id="tdeeChart" height="180"></canvas>
           <div class="empty" id="tdeeChartEmpty" style="padding:16px;">Need at least 3 weeks of calorie and weight data.</div>
         </div>
@@ -457,7 +468,7 @@
     </div>
   </div>
 
-  <script src="app.js?v=1.22b"></script>
+  <script src="app.js?v=1.22d"></script>
   <script>
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch(() => {});

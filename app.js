@@ -1116,8 +1116,9 @@ function getDayTotals(numDays) {
 
 let chartMeta = {};
 let weightRange = 30;
+let tdeeRange = 90;
 
-function drawChart(canvasId, datasets, labels, goalLine, minVal, maxValOverride, secondLine) {
+function drawChart(canvasId, datasets, labels, goalLine, minVal, maxValOverride, secondLine, avgLine) {
   const canvas = document.getElementById(canvasId);
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
@@ -1127,11 +1128,12 @@ function drawChart(canvasId, datasets, labels, goalLine, minVal, maxValOverride,
   canvas.width = w*dpr; canvas.height = h*dpr;
   canvas.style.width = w+'px'; canvas.style.height = h+'px';
   ctx.scale(dpr,dpr); ctx.clearRect(0,0,w,h);
-  const padL=44, padR=36, padT=16, padB=32;
+  const padL=44, padR=46, padT=16, padB=32;
   const chartW=w-padL-padR, chartH=h-padT-padB;
   const allVals = datasets.flatMap(d=>d.data).filter(v=>v>0);
   if (goalLine) allVals.push(goalLine);
   if (secondLine) allVals.push(secondLine);
+  if (avgLine) allVals.push(avgLine);
   const floor = minVal != null ? minVal : 0;
   const maxVal = maxValOverride != null ? maxValOverride : Math.max(...allVals,floor+1)*1.1;
   const range = maxVal - floor;
@@ -1162,6 +1164,15 @@ function drawChart(canvasId, datasets, labels, goalLine, minVal, maxValOverride,
     ctx.setLineDash([]); ctx.fillStyle='#22C55E'; ctx.textAlign='left';
     ctx.fillText('TDEE',w-padR+2,sy-6); ctx.textAlign='right'; ctx.fillStyle=textColor;
   }
+  if (avgLine && isFinite(avgLine)) {
+    const ay=padT+chartH-((avgLine-floor)/range)*chartH;
+    ctx.beginPath(); ctx.setLineDash([3,3]);
+    ctx.strokeStyle=isDark?'rgba(255,255,255,0.35)':'rgba(0,0,0,0.25)';
+    ctx.lineWidth=1;
+    ctx.moveTo(padL,ay); ctx.lineTo(w-padR,ay); ctx.stroke();
+    ctx.setLineDash([]); ctx.fillStyle=textColor; ctx.textAlign='left';
+    ctx.fillText('avg',w-padR+2,ay+4); ctx.textAlign='right';
+  }
   ctx.textAlign='center'; ctx.fillStyle=textColor;
   const step = labels.length>1 ? chartW/(labels.length-1) : 0;
   const showEvery = labels.length>14?3:labels.length>8?2:1;
@@ -1186,7 +1197,7 @@ function drawBarChart(canvasId, datasets, labels, goalLine) {
   canvas.width = w*dpr; canvas.height = h*dpr;
   canvas.style.width = w+'px'; canvas.style.height = h+'px';
   ctx.scale(dpr,dpr); ctx.clearRect(0,0,w,h);
-  const padL=44, padR=36, padT=16, padB=32;
+  const padL=44, padR=46, padT=16, padB=32;
   const chartW=w-padL-padR, chartH=h-padT-padB;
   const allVals = datasets.flatMap(d=>d.data);
   if (goalLine) allVals.push(goalLine);
@@ -1604,7 +1615,8 @@ function renderWeightChart() {
   const maxW = Math.max(...vals);
   const chartMin = Math.floor(minW - 3);
   const chartMax = Math.ceil(maxW + 3);
-  drawChart('weightChart',[{data:vals,color:cs.getPropertyValue('--teal').trim()||'#1A7A6D'}],labels,null,chartMin,chartMax);
+  const avgWeight = Math.round(vals.reduce((a,v) => a+v, 0) / vals.length * 10) / 10;
+  drawChart('weightChart',[{data:vals,color:cs.getPropertyValue('--teal').trim()||'#1A7A6D'}],labels,null,chartMin,chartMax,null,avgWeight);
   if (chartMeta['weightChart']) chartMeta['weightChart'].dates = recent.map(w => w.date);
 }
 
@@ -2244,6 +2256,11 @@ function selectCalDay(ds) {
 }
 
 // === SEARCH ===
+function clearSearch() {
+  document.getElementById('mealSearchInput').value = '';
+  document.getElementById('searchResults').innerHTML = '';
+}
+
 function searchMeals() {
   const query = document.getElementById('mealSearchInput').value.trim().toLowerCase();
   const container = document.getElementById('searchResults');
@@ -2294,16 +2311,21 @@ async function logSearchResult(id) {
 }
 
 // === TDEE OVER TIME CHART ===
+function setTDEERange(days) {
+  tdeeRange = days;
+  const label = days === 0 ? 'All' : days === 90 ? '3m' : days === 180 ? '6m' : days + 'd';
+  document.querySelectorAll('#tdeeRangeToggle .range-btn').forEach(b => b.classList.toggle('active', b.textContent === label));
+  renderTDEEChart();
+}
+
 function renderTDEEChart() {
   const chart = document.getElementById('tdeeChart');
   const empty = document.getElementById('tdeeChartEmpty');
-  // Calculate rolling 14-day TDEE for each day going back up to 90 days
+  const lookback = tdeeRange === 0 ? 365 : tdeeRange;
   const tdeePoints = [];
-  const cs = getComputedStyle(document.documentElement);
-  for (let i = 90; i >= 0; i--) {
+  for (let i = lookback; i >= 0; i--) {
     const refDate = new Date(); refDate.setDate(refDate.getDate() - i);
     const refDs = fmtDate(refDate);
-    // 14-day lookback from this date
     const days14 = [];
     for (let j = 13; j >= 0; j--) {
       const d = new Date(refDate); d.setDate(d.getDate() - j);
@@ -2315,7 +2337,6 @@ function renderTDEEChart() {
       if (cal > 0) days14.push({ cal, ex });
     }
     if (days14.length < 7) continue;
-    // Weight regression for this window
     const cutoff = new Date(refDate); cutoff.setDate(cutoff.getDate() - 15);
     const recentW = weightLog.filter(w => {
       const wd = new Date(w.date + 'T12:00:00');
@@ -2344,7 +2365,8 @@ function renderTDEEChart() {
   const vals = tdeePoints.map(p => p.tdee);
   const minV = Math.min(...vals);
   const maxV = Math.max(...vals);
-  drawChart('tdeeChart',[{data:vals,color:'#22C55E'}],labels,null,Math.floor(minV-100),Math.ceil(maxV+100));
+  const avgTDEE = Math.round(vals.reduce((a,v) => a+v, 0) / vals.length);
+  drawChart('tdeeChart',[{data:vals,color:'#22C55E'}],labels,null,Math.floor(minV-100),Math.ceil(maxV+100),null,avgTDEE);
   if (chartMeta['tdeeChart']) chartMeta['tdeeChart'].dates = tdeePoints.map(p => p.date);
 }
 
