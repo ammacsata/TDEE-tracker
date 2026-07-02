@@ -1826,11 +1826,16 @@ async function getMealAnalysis(mealItems, todayTotals) {
   const afterCarbs = todayTotals.carbs + totalMealCarbs;
   const afterFat = todayTotals.fat + totalMealFat;
   const afterFiber = todayTotals.fiber + totalMealFiber;
+  // Get today's exercise
+  const today = fmtDate(new Date());
+  const todayEx = exerciseLog.filter(e => e.date === today);
+  const exBurned = todayEx.reduce((a,e) => a + e.calories_burned, 0);
+  const netCal = afterCal - exBurned;
   try {
     const data = await callClaude(key, {
       model: 'claude-sonnet-4-6', max_tokens: 200,
-      system: `You are a concise nutrition coach. Given a meal, the user's daily totals after this meal, and their goals, give 1-2 sentences of specific actionable advice. Focus on what to DO — suggest swaps, flag concerns, or affirm good choices. Be direct and practical, not generic. No stats unless they support the advice. Do not repeat the meal description.`,
-      messages: [{ role: 'user', content: `Meal: ${mealSummary}\n\nAfter logging this meal:\nCalories: ${afterCal} / ${goals.cal} goal\nProtein: ${afterProt}g / ${goals.prot}g goal\nCarbs: ${afterCarbs}g / ${goals.carbs}g goal\nFat: ${afterFat}g / ${goals.fat}g goal\nFiber: ${afterFiber}g / ${goals.fiber}g goal\n\nGive 1-2 sentences of actionable advice.` }]
+      system: `You are a concise nutrition coach. Given a meal, the user's daily totals after this meal, exercise burned, and their goals, give 1-2 sentences of specific actionable advice. Use NET calories (consumed minus exercise) when assessing calorie budget. Focus on what to DO — suggest swaps, flag concerns, or affirm good choices. Be direct and practical, not generic. No stats unless they support the advice. Do not repeat the meal description.`,
+      messages: [{ role: 'user', content: `Meal: ${mealSummary}\n\nAfter logging this meal:\nCalories consumed: ${afterCal} / ${goals.cal} goal\nExercise burned today: ${exBurned} cal\nNet calories: ${netCal} / ${goals.cal} goal\nProtein: ${afterProt}g / ${goals.prot}g goal\nCarbs: ${afterCarbs}g / ${goals.carbs}g goal\nFat: ${afterFat}g / ${goals.fat}g goal\nFiber: ${afterFiber}g / ${goals.fiber}g goal\n\nGive 1-2 sentences of actionable advice based on net calories.` }]
     });
     const text = data.content.filter(b=>b.type==='text').map(b=>b.text).join('');
     if (text.trim()) {
