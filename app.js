@@ -972,9 +972,10 @@ function renderToday() {
   renderGoalWeight();
   // Calorie remaining bar
   const remaining = goals.cal - netCal;
-  const pctUsed = goals.cal > 0 ? Math.min(Math.round((netCal / goals.cal) * 100), 100) : 0;
-  const barColor = pctUsed < 75 ? '#22C55E' : pctUsed < 95 ? '#F59E0B' : '#EF4444';
-  document.getElementById('calRemainingFill').style.width = Math.min(pctUsed, 100) + '%';
+  const pctRaw = goals.cal > 0 ? Math.round((netCal / goals.cal) * 100) : 0;
+  const pctUsed = Math.min(pctRaw, 100);
+  const barColor = pctRaw <= 100 ? '#22C55E' : pctRaw <= 110 ? '#F59E0B' : '#EF4444';
+  document.getElementById('calRemainingFill').style.width = pctUsed + '%';
   document.getElementById('calRemainingFill').style.background = barColor;
   if (remaining > 0) {
     document.getElementById('calRemainingText').textContent = remaining + (isViewingToday ? ' cal remaining' : ' cal under');
@@ -1179,9 +1180,11 @@ function drawChart(canvasId, datasets, labels, goalLine, minVal, maxValOverride,
   const showEvery = labels.length>14?3:labels.length>8?2:1;
   labels.forEach((lbl,i) => { if (i%showEvery===0||i===labels.length-1) ctx.fillText(lbl,padL+i*step,h-8); });
   datasets.forEach(ds => {
-    ctx.beginPath(); ctx.strokeStyle=ds.color; ctx.lineWidth=2.5; ctx.lineJoin='round'; ctx.lineCap='round';
+    ctx.beginPath(); ctx.strokeStyle=ds.color; ctx.lineWidth=ds.thin?1.5:2.5; ctx.lineJoin='round'; ctx.lineCap='round';
+    if (ds.thin) ctx.setLineDash([4,3]);
     ds.data.forEach((val,i) => { const x=padL+i*step,y=padT+chartH-((val-floor)/range)*chartH; i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
     ctx.stroke();
+    if (ds.thin) { ctx.setLineDash([]); return; }
     ds.data.forEach((val,i) => { if(val>0){ctx.beginPath();ctx.fillStyle=ds.color;ctx.arc(padL+i*step,padT+chartH-((val-floor)/range)*chartH,3.5,0,Math.PI*2);ctx.fill();} });
   });
   // Store metadata for click navigation
@@ -1283,10 +1286,23 @@ function renderTrends() {
       const exBurned = dayEx.reduce((a,e) => a + e.calories_burned, 0);
       return d.cal > 0 ? d.cal - exBurned : 0;
     });
+    // Compute ±7 day smoothed average
+    const widerDays = getDayTotals(trendRange + 14);
+    const smoothedData = days.map((d, idx) => {
+      // Find this day's index in the wider array
+      const wideIdx = widerDays.findIndex(wd => wd.date === d.date);
+      if (wideIdx < 0) return 0;
+      let sum7 = 0, count7 = 0;
+      for (let j = Math.max(0, wideIdx - 7); j <= Math.min(widerDays.length - 1, wideIdx + 7); j++) {
+        if (widerDays[j].cal > 0) { sum7 += widerDays[j].cal; count7++; }
+      }
+      return count7 > 0 ? Math.round(sum7 / count7) : 0;
+    });
     const tdeeLine = calculateTDEE();
     drawChart('calChart',[
       {data:days.map(d=>d.cal),color:col('--blue')||'#2B6CB0'},
-      {data:netCalData,color:'#22C55E'}
+      {data:netCalData,color:'#22C55E'},
+      {data:smoothedData,color:'rgba(43,108,176,0.4)',thin:true}
     ],labels,goals.cal,null,null,tdeeLine);
     const dates = days.map(d => d.date);
     if (chartMeta['calChart']) chartMeta['calChart'].dates = dates;
@@ -1618,7 +1634,21 @@ function renderWeightChart() {
   const chartMin = Math.floor(minW - 3);
   const chartMax = Math.ceil(maxW + 3);
   const avgWeight = Math.round(vals.reduce((a,v) => a+v, 0) / vals.length * 10) / 10;
-  drawChart('weightChart',[{data:vals,color:cs.getPropertyValue('--teal').trim()||'#1A7A6D'}],labels,null,chartMin,chartMax,null,avgWeight);
+  // Compute linear regression trend line
+  const n2 = vals.length;
+  let trendData = [];
+  if (n2 >= 2) {
+    const sumX = vals.reduce((a,_,i) => a+i, 0);
+    const sumY = vals.reduce((a,v) => a+v, 0);
+    const sumXY = vals.reduce((a,v,i) => a+i*v, 0);
+    const sumX2 = vals.reduce((a,_,i) => a+i*i, 0);
+    const slope = (n2*sumXY - sumX*sumY) / (n2*sumX2 - sumX*sumX);
+    const intercept = (sumY - slope*sumX) / n2;
+    trendData = vals.map((_,i) => Math.round((slope*i + intercept)*10)/10);
+  }
+  const datasets = [{data:vals,color:cs.getPropertyValue('--teal').trim()||'#1A7A6D'}];
+  if (trendData.length >= 2) datasets.push({data:trendData,color:'rgba(26,122,109,0.35)',thin:true});
+  drawChart('weightChart',datasets,labels,null,chartMin,chartMax,null,avgWeight);
   if (chartMeta['weightChart']) chartMeta['weightChart'].dates = recent.map(w => w.date);
 }
 
