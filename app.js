@@ -463,7 +463,7 @@ async function runEstimation(key, desc) {
     btn.disabled = false;
     return;
   }
-  const memCtx = memoryNotes ? `\n\nPersonal calibration notes — apply these:\n${memoryNotes}\n\nAlways prioritise these over generic defaults.` : '';
+  const memCtx = memoryNotes ? `\n\nPersonal calibration notes — apply these to FOOD estimates only:\n${memoryNotes}\n\nIMPORTANT: If any notes mention exercise, activity, or calories burned, do NOT subtract those from the food calorie estimate. Only adjust the food's own calories, protein, carbs, fat, and fiber based on food-related notes (portion sizes, cooking methods, ingredients). Exercise calories are tracked separately.` : '';
   const recipeCtx = recipes.length > 0 ? `\n\nUser's saved recipes — if the meal matches one of these, use these exact values:\n${recipes.map(r => `- ${r.recipe_name}: ${r.calories} cal, ${r.protein}g P, ${r.carbs}g C, ${r.fat}g F, ${r.fiber}g f`).join('\n')}` : '';
   try {
     const detectData = await callClaude(key, { model: 'claude-sonnet-4-6', max_tokens: 50, system: 'The user will describe a meal. Respond with ONLY "yes" or "no" — does this mention a specific restaurant, fast food chain, brand name, or packaged food product? No explanation.', messages: [{ role: 'user', content: desc }] });
@@ -1037,9 +1037,10 @@ function renderToday() {
   // Render exercise list
   const exCard = document.getElementById('exerciseCard');
   const exList = document.getElementById('exerciseList');
-  if (dayEx.length === 0) { exCard.style.display = 'none'; }
-  else {
-    exCard.style.display = '';
+  exCard.style.display = '';
+  if (dayEx.length === 0) {
+    exList.innerHTML = '<p style="font-size:13px;color:var(--text-3);padding:4px 0;">No exercise logged for this day.</p>';
+  } else {
     exList.innerHTML = dayEx.map(e => `<div class="exercise-item">
       <span class="exercise-name">${esc(e.description)}</span>
       <span class="exercise-cal">-${e.calories_burned} cal</span>
@@ -1965,7 +1966,7 @@ async function logExercise() {
           const rows = await supa('exercise','POST',{body:entry});
           entry.id = rows[0].id;
           setSyncStatus('ok','synced');
-        } catch(e) { entry.id = Date.now(); setSyncStatus('err','sync error'); }
+        } catch(e) { entry.id = Date.now(); setSyncStatus('err','save failed'); showQuickToast('⚠ Exercise save failed — stored locally only'); logError('exerciseSave', e.message); }
       } else { entry.id = Date.now(); }
       exerciseLog.unshift(entry);
       document.getElementById('exerciseInput').value = '';
