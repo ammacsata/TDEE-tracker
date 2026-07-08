@@ -1,4 +1,4 @@
-// nutritracker v1.20 — app.js
+// nutritracker v1.24 — app.js
 const LS_CREDS = 'nutritracker_creds';
 const LS_SESSION = 'nutritracker_session';
 const SUPA_URL = 'https://whdamcifxsjfmnzgdrxe.supabase.co';
@@ -1214,7 +1214,7 @@ function drawChart(canvasId, datasets, labels, goalLine, minVal, maxValOverride,
   }
   ctx.textAlign='center'; ctx.fillStyle=textColor;
   const step = labels.length>1 ? chartW/(labels.length-1) : 0;
-  const showEvery = labels.length>14?3:labels.length>8?2:1;
+  const showEvery = Math.max(1, Math.ceil(labels.length / 10));
   labels.forEach((lbl,i) => { if (i%showEvery===0||i===labels.length-1) ctx.fillText(lbl,padL+i*step,h-8); });
   datasets.forEach(ds => {
     ctx.beginPath(); ctx.strokeStyle=ds.color; ctx.lineWidth=ds.thin?1.5:2.5; ctx.lineJoin='round'; ctx.lineCap='round';
@@ -1272,7 +1272,7 @@ function drawBarChart(canvasId, datasets, labels, goalLine) {
   const groupWidth = (chartW - groupGap * (numDays - 1)) / numDays;
   const barGap = 1;
   const barWidth = Math.max(2, (groupWidth - (numBars+1)*barGap) / numBars);
-  const showEvery = numDays > 14 ? 3 : numDays > 8 ? 2 : 1;
+  const showEvery = Math.max(1, Math.ceil(numDays / 10));
   labels.forEach((lbl, i) => {
     const groupX = padL + i * (groupWidth + groupGap);
     if (i % showEvery === 0 || i === numDays-1) ctx.fillText(lbl, groupX + groupWidth/2, h-8);
@@ -1684,8 +1684,10 @@ function renderWeightChart() {
   const vals = recent.map(w=>w.value);
   const minW = Math.min(...vals);
   const maxW = Math.max(...vals);
-  const chartMin = Math.floor(minW - 3);
-  const chartMax = Math.ceil(maxW + 3);
+  const spread = maxW - minW;
+  const padding = Math.max(1, Math.min(3, spread * 0.3));
+  const chartMin = Math.floor((minW - padding) * 10) / 10;
+  const chartMax = Math.ceil((maxW + padding) * 10) / 10;
   const avgWeight = Math.round(vals.reduce((a,v) => a+v, 0) / vals.length * 10) / 10;
   // Compute linear regression trend line
   const n2 = vals.length;
