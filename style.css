@@ -274,7 +274,7 @@ body {
   justify-content: flex-end;
 }
 .estimate-btn {
-  margin-left: auto;
+  width: 100%;
   padding: 10px 22px;
   font-size: 14px;
   font-weight: 500;
@@ -1491,7 +1491,7 @@ body {
   .tab-btn { font-size: 12px; padding: 9px 4px; }
   .meal-item { gap: 8px; }
   .meal-item-tag { display: none; }
-  .estimate-btn { width: 100%; margin-left: 0; }
+
   .action-row { flex-direction: column; }
 }
 
