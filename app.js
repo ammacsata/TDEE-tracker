@@ -1951,16 +1951,19 @@ async function logExercise() {
   if (!key) return;
   try {
     const today = fmtDate(new Date());
-    const exCalNotes = memoryNotes ? `\n\nUser's calibration notes — follow these instructions for exercise logging:\n${memoryNotes}` : '';
+    const exCalNotes = memoryNotes ? `\n\nUser's calibration notes — these OVERRIDE default estimates. Use these values instead of typical values when they apply:\n${memoryNotes}` : '';
     const data = await callClaude(key, {
       model: 'claude-sonnet-4-6', max_tokens: 100,
-      system: `Extract exercise info. Today is ${today}. Respond ONLY with JSON: {"description":"short name","calories_burned":number,"date":"YYYY-MM-DD"}. Estimate calories burned based on typical values. If no date mentioned, use "${today}".${exCalNotes}`,
+      system: `Extract exercise info. Today is ${today}. Respond ONLY with JSON: {"description":"short name","calories_burned":number,"date":"YYYY-MM-DD"}.${exCalNotes ? ' Use the calibration notes below for calorie calculations when applicable — do NOT also add a separate estimate on top.' : ' Estimate calories burned based on typical values.'} If no date mentioned, use "${today}". The date MUST be in YYYY-MM-DD format.${exCalNotes}`,
       messages: [{ role: 'user', content: input }]
     });
     const text = data.content[0].text.trim().replace(/```json|```/g,'');
     const parsed = JSON.parse(text);
     if (parsed.calories_burned && parsed.date) {
-      const entry = { date: parsed.date, description: parsed.description || input, calories_burned: parsed.calories_burned };
+      // Normalize date to YYYY-MM-DD
+      const dateStr = parsed.date.match(/\d{4}-\d{2}-\d{2}/);
+      const normalizedDate = dateStr ? dateStr[0] : today;
+      const entry = { date: normalizedDate, description: parsed.description || input, calories_burned: parsed.calories_burned };
       if (supaReady) {
         setSyncStatus('busy','saving…');
         try {
