@@ -1,4 +1,4 @@
-// nutritracker v1.24 — app.js
+// nutritracker v1.25 — app.js
 const LS_CREDS = 'nutritracker_creds';
 const LS_SESSION = 'nutritracker_session';
 const SUPA_URL = 'https://whdamcifxsjfmnzgdrxe.supabase.co';
@@ -436,6 +436,110 @@ async function callClaude(key, body) {
   if (data.error) throw new Error(data.error.message);
   return data;
 }
+let photoPerServing = null;
+
+async function handlePhotoInput(input) {
+  if (!input.files || !input.files[0]) return;
+  const key = document.getElementById('apiKey').value.trim();
+  if (!key) { input.value = ''; return; }
+  const file = input.files[0];
+  input.value = '';
+  // Convert to base64
+  const base64 = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = () => reject(new Error('Failed to read image'));
+    reader.readAsDataURL(file);
+  });
+  const mediaType = file.type || 'image/jpeg';
+  document.getElementById('estimating').classList.add('show');
+  document.getElementById('errorMsg').classList.remove('show');
+  document.getElementById('previewCard').classList.remove('show');
+  try {
+    checkRateLimit();
+    const data = await callClaude(key, {
+      model: 'claude-sonnet-4-6', max_tokens: 400,
+      system: `You read nutrition labels from photos. Extract the nutrition facts and respond ONLY with JSON:\n{"meal_name":"product name","servings_per_container":number,"serving_size":"description","calories":number,"protein":number,"carbs":number,"fat":number,"fiber":number}\nAll macro values should be PER SERVING. If you can read the product name, use it. If not, describe it. All numbers integers. No markdown.`,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+          { type: 'text', text: 'Read this nutrition label and extract the per-serving macros.' }
+        ]
+      }]
+    });
+    const text = data.content.filter(b => b.type === 'text').map(b => b.text).join('');
+    const match = text.match(/\{[\s\S]*?"meal_name"[\s\S]*?\}/);
+    if (!match) throw new Error('Could not read nutrition label. Try a clearer photo.');
+    let r;
+    try { r = JSON.parse(match[0].replace(/```json|```/g,'').trim()); }
+    catch(e) { throw new Error('Could not parse nutrition data. Try again.'); }
+    // Store per-serving values
+    photoPerServing = {
+      meal_name: r.meal_name,
+      calories: r.calories || 0,
+      protein: r.protein || 0,
+      carbs: r.carbs || 0,
+      fat: r.fat || 0,
+      fiber: r.fiber || 0,
+      servings_per_container: r.servings_per_container || 1,
+      serving_size: r.serving_size || '1 serving'
+    };
+    // Show preview with 1 serving
+    const m = photoPerServing;
+    pendingMeals = [{ meal_name: m.meal_name, calories: m.calories, protein: m.protein, carbs: m.carbs, fat: m.fat, fiber: m.fiber }];
+    pendingDescription = m.meal_name;
+    document.getElementById('previewName').textContent = m.meal_name;
+    document.getElementById('multiPreview').style.display = 'none';
+    document.getElementById('pCal').textContent = m.calories;
+    document.getElementById('pProt').textContent = m.protein;
+    document.getElementById('pCarbs').textContent = m.carbs;
+    document.getElementById('pFat').textContent = m.fat;
+    document.getElementById('pFiber').textContent = m.fiber;
+    document.getElementById('previewNote').textContent = `Per serving: ${m.serving_size}`;
+    // Show serving selector
+    const sel = document.getElementById('servingSelector');
+    sel.style.display = '';
+    document.getElementById('servingCount').value = 1;
+    document.getElementById('servingInfo').textContent = m.servings_per_container > 1 ? `(${m.servings_per_container} servings in container)` : '';
+    document.getElementById('inlineNote').value = '';
+    noteInputVisible = false;
+    document.getElementById('calInline').classList.remove('show');
+    document.getElementById('calToggleLabel').textContent = 'Add a calibration note';
+    document.getElementById('previewCard').classList.add('show');
+    // Get meal analysis
+    document.getElementById('mealAnalysis').style.display = 'none';
+    const today = fmtDate(new Date());
+    const todayMeals = meals.filter(m => m.date === today);
+    const todayTotals = todayMeals.reduce((a,m) => ({cal:a.cal+m.calories,prot:a.prot+m.protein,carbs:a.carbs+m.carbs,fat:a.fat+m.fat,fiber:a.fiber+(m.fiber||0)}),{cal:0,prot:0,carbs:0,fat:0,fiber:0});
+    getMealAnalysis(pendingMeals, todayTotals);
+  } catch(e) {
+    document.getElementById('errorMsg').textContent = 'Error: ' + e.message;
+    document.getElementById('errorMsg').classList.add('show');
+  } finally {
+    document.getElementById('estimating').classList.remove('show');
+  }
+}
+
+function updatePhotoServings() {
+  if (!photoPerServing) return;
+  const count = parseFloat(document.getElementById('servingCount').value) || 1;
+  const m = photoPerServing;
+  const cal = Math.round(m.calories * count);
+  const prot = Math.round(m.protein * count);
+  const carbs = Math.round(m.carbs * count);
+  const fat = Math.round(m.fat * count);
+  const fiber = Math.round(m.fiber * count);
+  document.getElementById('pCal').textContent = cal;
+  document.getElementById('pProt').textContent = prot;
+  document.getElementById('pCarbs').textContent = carbs;
+  document.getElementById('pFat').textContent = fat;
+  document.getElementById('pFiber').textContent = fiber;
+  const name = count !== 1 ? `${m.meal_name} (×${count})` : m.meal_name;
+  document.getElementById('previewName').textContent = name;
+  pendingMeals = [{ meal_name: name, calories: cal, protein: prot, carbs, fat, fiber }];
+}
+
 async function estimateMeal() {
   const key = document.getElementById('apiKey').value.trim();
   const desc = document.getElementById('mealInput').value.trim();
@@ -524,6 +628,8 @@ function showPreview(items) {
   noteInputVisible = false;
   document.getElementById('calInline').classList.remove('show');
   document.getElementById('calToggleLabel').textContent = 'Add a calibration note';
+  document.getElementById('servingSelector').style.display = 'none';
+  photoPerServing = null;
   document.getElementById('previewCard').classList.add('show');
   // Get meal analysis
   document.getElementById('mealAnalysis').style.display = 'none';
@@ -578,12 +684,14 @@ async function confirmLog() {
   }
   document.getElementById('mealInput').value = '';
   document.getElementById('previewCard').classList.remove('show');
+  document.getElementById('servingSelector').style.display = 'none';
+  photoPerServing = null;
   viewDate = new Date(loggedDate + 'T12:00:00');
   showUndo(loggedMeals.length === 1 ? 'Meal logged' : loggedMeals.length + ' meals logged', { type: 'log', meals: loggedMeals });
   renderToday(); switchTab('today');
 }
 
-function cancelEstimate() { document.getElementById('previewCard').classList.remove('show'); pendingMeals = null; pendingDescription = null; editReplacingId = null; clearDateBanner(); }
+function cancelEstimate() { document.getElementById('previewCard').classList.remove('show'); document.getElementById('servingSelector').style.display='none'; pendingMeals = null; pendingDescription = null; photoPerServing = null; editReplacingId = null; clearDateBanner(); }
 
 async function deleteMeal(id) {
   const meal = meals.find(m => m.id === id);
