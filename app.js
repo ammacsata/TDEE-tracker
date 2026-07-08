@@ -993,6 +993,19 @@ function renderToday() {
     const fillPct = Math.min(pct, 100);
     return `<div class="progress-row"><span class="progress-name">${b.label}</span><div class="progress-track"><div class="progress-fill" style="width:${fillPct}%;background:${b.color}"></div></div><span class="progress-pct">${pct}%</span></div>`;
   }).join('');
+  // Render exercise list (before meals so it's not blocked by empty meals return)
+  const exCard = document.getElementById('exerciseCard');
+  const exList = document.getElementById('exerciseList');
+  exCard.style.display = '';
+  if (dayEx.length === 0) {
+    exList.innerHTML = '<p style="font-size:13px;color:var(--text-3);padding:4px 0;">No exercise logged for this day.</p>';
+  } else {
+    exList.innerHTML = dayEx.map(e => `<div class="exercise-item">
+      <span class="exercise-name">${esc(e.description)}</span>
+      <span class="exercise-cal">-${e.calories_burned} cal</span>
+      <button class="del-btn" onclick="deleteExercise(${e.id})" aria-label="Delete">✕</button>
+    </div>`).join('');
+  }
   const list = document.getElementById('logList');
   if (day.length === 0) {
     const isToday = ds === fmtDate(new Date());
@@ -1034,19 +1047,6 @@ function renderToday() {
     });
   });
   list.innerHTML = html;
-  // Render exercise list
-  const exCard = document.getElementById('exerciseCard');
-  const exList = document.getElementById('exerciseList');
-  exCard.style.display = '';
-  if (dayEx.length === 0) {
-    exList.innerHTML = '<p style="font-size:13px;color:var(--text-3);padding:4px 0;">No exercise logged for this day.</p>';
-  } else {
-    exList.innerHTML = dayEx.map(e => `<div class="exercise-item">
-      <span class="exercise-name">${esc(e.description)}</span>
-      <span class="exercise-cal">-${e.calories_burned} cal</span>
-      <button class="del-btn" onclick="deleteExercise(${e.id})" aria-label="Delete">✕</button>
-    </div>`).join('');
-  }
 }
 
 // Tab swiping
@@ -1944,11 +1944,14 @@ async function suggestMeal() {
 }
 
 // === EXERCISE ===
+let exerciseLogging = false;
 async function logExercise() {
   const input = document.getElementById('exerciseInput').value.trim();
-  if (!input) return;
+  if (!input || exerciseLogging) return;
   const key = document.getElementById('apiKey').value.trim();
   if (!key) return;
+  exerciseLogging = true;
+  document.getElementById('exerciseInput').disabled = true;
   try {
     const today = fmtDate(new Date());
     const exCalNotes = memoryNotes ? `\n\nUser's calibration notes — these OVERRIDE default estimates. Use these values instead of typical values when they apply:\n${memoryNotes}` : '';
@@ -1990,6 +1993,8 @@ async function logExercise() {
       renderToday();
     }
   }
+  exerciseLogging = false;
+  document.getElementById('exerciseInput').disabled = false;
 }
 
 async function deleteExercise(id) {
