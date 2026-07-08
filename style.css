@@ -1682,3 +1682,28 @@ body {
 .sub-tab:hover:not(.active) { background: var(--bg-hover); }
 .trend-sub { display: none; }
 .trend-sub.active { display: block; }
+
+/* Clickable chart legends */
+.chart-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+  transition: opacity 0.15s;
+}
+.chart-legend-item.off {
+  opacity: 0.3;
+  text-decoration: line-through;
+}
+.chart-legend-swatch {
+  width: 10px;
+  height: 3px;
+  border-radius: 2px;
+  display: inline-block;
+}
+.chart-legend-swatch.dashed {
+  height: 0;
+  border-top: 2px dashed;
+}

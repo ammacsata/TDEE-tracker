@@ -1119,6 +1119,43 @@ function getDayTotals(numDays) {
 let chartMeta = {};
 let weightRange = 30;
 let tdeeRange = 90;
+let chartToggles = {};
+
+function renderLegend(containerId, items, chartRedrawFn) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (!chartToggles[containerId]) chartToggles[containerId] = {};
+  items.forEach(item => {
+    if (chartToggles[containerId][item.label] === undefined) chartToggles[containerId][item.label] = true;
+  });
+  el.innerHTML = items.map(item => {
+    const on = chartToggles[containerId][item.label] !== false;
+    const swatchClass = item.dashed ? 'chart-legend-swatch dashed' : 'chart-legend-swatch';
+    const swatchStyle = item.dashed ? `border-color:${item.color}` : `background:${item.color}`;
+    return `<span class="chart-legend-item${on?'':' off'}" data-label="${esc(item.label)}" style="color:${item.color}"><span class="${swatchClass}" style="${swatchStyle}"></span> ${esc(item.label)}</span>`;
+  }).join('');
+  el.querySelectorAll('.chart-legend-item').forEach(span => {
+    span.addEventListener('click', () => {
+      const label = span.dataset.label;
+      chartToggles[containerId][label] = !chartToggles[containerId][label];
+      chartRedrawFn();
+    });
+  });
+}
+
+function isToggled(containerId, label) {
+  return chartToggles[containerId]?.[label] !== false;
+}
+
+function rollingAvg(data, windowSize) {
+  return data.map((_, i, arr) => {
+    let sum = 0, count = 0;
+    for (let j = Math.max(0, i - windowSize); j <= Math.min(arr.length - 1, i + windowSize); j++) {
+      if (arr[j] > 0) { sum += arr[j]; count++; }
+    }
+    return count > 0 ? Math.round(sum / count * 10) / 10 : 0;
+  });
+}
 
 function drawChart(canvasId, datasets, labels, goalLine, minVal, maxValOverride, secondLine, avgLine) {
   const canvas = document.getElementById(canvasId);
@@ -1286,10 +1323,8 @@ function renderTrends() {
       const exBurned = dayEx.reduce((a,e) => a + e.calories_burned, 0);
       return d.cal > 0 ? d.cal - exBurned : 0;
     });
-    // Compute ±7 day smoothed average
     const widerDays = getDayTotals(trendRange + 14);
-    const smoothedData = days.map((d, idx) => {
-      // Find this day's index in the wider array
+    const smoothedData = days.map((d) => {
       const wideIdx = widerDays.findIndex(wd => wd.date === d.date);
       if (wideIdx < 0) return 0;
       let sum7 = 0, count7 = 0;
@@ -1299,34 +1334,52 @@ function renderTrends() {
       return count7 > 0 ? Math.round(sum7 / count7) : 0;
     });
     const tdeeLine = calculateTDEE();
-    drawChart('calChart',[
-      {data:days.map(d=>d.cal),color:col('--blue')||'#2B6CB0'},
-      {data:netCalData,color:'#22C55E'},
-      {data:smoothedData,color:'rgba(43,108,176,0.4)',thin:true}
-    ],labels,goals.cal,null,null,tdeeLine);
+    const lid = 'calChartLegend';
+    const allDS = [
+      {data:days.map(d=>d.cal),color:col('--blue')||'#2B6CB0',label:'Consumed'},
+      {data:netCalData,color:'#22C55E',label:'Net'},
+      {data:smoothedData,color:'rgba(43,108,176,0.4)',thin:true,label:'7d avg'}
+    ];
+    renderLegend(lid, [
+      {label:'Consumed',color:col('--blue')||'#2B6CB0'},
+      {label:'Net',color:'#22C55E'},
+      {label:'7d avg',color:'rgba(43,108,176,0.5)',dashed:true},
+      {label:'TDEE',color:'#22C55E',dashed:true}
+    ], () => renderTrends());
+    const filteredDS = allDS.filter(ds => isToggled(lid, ds.label));
+    const showTDEE = isToggled(lid, 'TDEE') ? tdeeLine : null;
+    drawChart('calChart',filteredDS,labels,goals.cal,null,null,showTDEE);
     const dates = days.map(d => d.date);
     if (chartMeta['calChart']) chartMeta['calChart'].dates = dates;
   }
   // Macros
   if (sub === 'macros') {
-    drawChart('macroChart',[
-      {data:days.map(d=>d.prot),color:col('--accent')||'#2E6B3E'},
-      {data:days.map(d=>d.carbs),color:col('--amber')||'#B7791F'},
-      {data:days.map(d=>d.fat),color:col('--coral')||'#C53D2F'},
-      {data:days.map(d=>d.fiber),color:col('--purple')||'#A855F7'}
-    ],labels,null);
+    const macroLid = 'macroChartLegend';
+    const macroColors = {Protein:col('--accent')||'#2E6B3E',Carbs:col('--amber')||'#B7791F',Fat:col('--coral')||'#C53D2F',Fiber:col('--purple')||'#A855F7'};
+    const macroAllDS = [
+      {data:days.map(d=>d.prot),color:macroColors.Protein,label:'Protein'},
+      {data:days.map(d=>d.carbs),color:macroColors.Carbs,label:'Carbs'},
+      {data:days.map(d=>d.fat),color:macroColors.Fat,label:'Fat'},
+      {data:days.map(d=>d.fiber),color:macroColors.Fiber,label:'Fiber'}
+    ];
+    renderLegend(macroLid, Object.entries(macroColors).map(([k,v])=>({label:k,color:v})), () => renderTrends());
+    drawChart('macroChart',macroAllDS.filter(ds => isToggled(macroLid, ds.label)),labels,null);
+
+    const pctLid = 'macroPctChartLegend';
     const pctData = days.map(d => ({
       prot: goals.prot > 0 ? Math.round((d.prot/goals.prot)*100) : 0,
       carbs: goals.carbs > 0 ? Math.round((d.carbs/goals.carbs)*100) : 0,
       fat: goals.fat > 0 ? Math.round((d.fat/goals.fat)*100) : 0,
       fiber: goals.fiber > 0 ? Math.round((d.fiber/goals.fiber)*100) : 0
     }));
-    drawBarChart('macroPctChart', [
-      {data:pctData.map(d=>d.prot),color:col('--accent')||'#2E6B3E',label:'P'},
-      {data:pctData.map(d=>d.carbs),color:col('--amber')||'#B7791F',label:'C'},
-      {data:pctData.map(d=>d.fat),color:col('--coral')||'#C53D2F',label:'F'},
-      {data:pctData.map(d=>d.fiber),color:col('--purple')||'#A855F7',label:'f'}
-    ], labels, 100);
+    const pctAllDS = [
+      {data:pctData.map(d=>d.prot),color:macroColors.Protein,label:'Protein'},
+      {data:pctData.map(d=>d.carbs),color:macroColors.Carbs,label:'Carbs'},
+      {data:pctData.map(d=>d.fat),color:macroColors.Fat,label:'Fat'},
+      {data:pctData.map(d=>d.fiber),color:macroColors.Fiber,label:'Fiber'}
+    ];
+    renderLegend(pctLid, Object.entries(macroColors).map(([k,v])=>({label:k,color:v})), () => renderTrends());
+    drawBarChart('macroPctChart',pctAllDS.filter(ds => isToggled(pctLid, ds.label)),labels,100);
     const dates = days.map(d => d.date);
     if (chartMeta['macroChart']) chartMeta['macroChart'].dates = dates;
     if (chartMeta['macroPctChart']) chartMeta['macroPctChart'].dates = dates;
@@ -1646,9 +1699,22 @@ function renderWeightChart() {
     const intercept = (sumY - slope*sumX) / n2;
     trendData = vals.map((_,i) => Math.round((slope*i + intercept)*10)/10);
   }
-  const datasets = [{data:vals,color:cs.getPropertyValue('--teal').trim()||'#1A7A6D'}];
-  if (trendData.length >= 2) datasets.push({data:trendData,color:'rgba(26,122,109,0.35)',thin:true});
-  drawChart('weightChart',datasets,labels,null,chartMin,chartMax,null,avgWeight);
+  // 7d rolling average
+  const smoothedWeight = rollingAvg(vals, 7);
+  const tealColor = cs.getPropertyValue('--teal').trim()||'#1A7A6D';
+  const lid = 'weightChartLegend';
+  const allDS = [
+    {data:vals,color:tealColor,label:'Weight'},
+    {data:trendData.length>=2?trendData:[],color:'rgba(26,122,109,0.35)',thin:true,label:'Trend'},
+    {data:smoothedWeight,color:'rgba(26,122,109,0.5)',thin:true,label:'7d avg'}
+  ].filter(ds => ds.data.length > 0);
+  renderLegend(lid, [
+    {label:'Weight',color:tealColor},
+    {label:'Trend',color:'rgba(26,122,109,0.4)',dashed:true},
+    {label:'7d avg',color:'rgba(26,122,109,0.6)',dashed:true}
+  ], () => renderWeightChart());
+  const filteredDS = allDS.filter(ds => isToggled(lid, ds.label));
+  drawChart('weightChart',filteredDS,labels,null,chartMin,chartMax,null,isToggled(lid,'Weight')?avgWeight:null);
   if (chartMeta['weightChart']) chartMeta['weightChart'].dates = recent.map(w => w.date);
 }
 
@@ -2414,7 +2480,18 @@ function renderTDEEChart() {
   const minV = Math.min(...vals);
   const maxV = Math.max(...vals);
   const avgTDEE = Math.round(vals.reduce((a,v) => a+v, 0) / vals.length);
-  drawChart('tdeeChart',[{data:vals,color:'#22C55E'}],labels,null,Math.floor(minV-100),Math.ceil(maxV+100),null,avgTDEE);
+  const smoothedTDEE = rollingAvg(vals, 7);
+  const lid = 'tdeeChartLegend';
+  const allDS = [
+    {data:vals,color:'#22C55E',label:'TDEE'},
+    {data:smoothedTDEE,color:'rgba(34,197,94,0.4)',thin:true,label:'7d avg'}
+  ];
+  renderLegend(lid, [
+    {label:'TDEE',color:'#22C55E'},
+    {label:'7d avg',color:'rgba(34,197,94,0.5)',dashed:true}
+  ], () => renderTDEEChart());
+  const filteredDS = allDS.filter(ds => isToggled(lid, ds.label));
+  drawChart('tdeeChart',filteredDS,labels,null,Math.floor(minV-100),Math.ceil(maxV+100),null,isToggled(lid,'TDEE')?avgTDEE:null);
   if (chartMeta['tdeeChart']) chartMeta['tdeeChart'].dates = tdeePoints.map(p => p.date);
 }
 
