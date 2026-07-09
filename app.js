@@ -487,7 +487,11 @@ async function handlePhotoInput(input) {
     };
     // Show preview with 1 serving
     const m = photoPerServing;
-    pendingMeals = [{ meal_name: m.meal_name, calories: m.calories, protein: m.protein, carbs: m.carbs, fat: m.fat, fiber: m.fiber }];
+    const now = new Date();
+    const photoDate = editForDate || fmtDate(now);
+    const photoTime = now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+    const photoType = getMealType();
+    pendingMeals = [{ meal_name: m.meal_name, calories: m.calories, protein: m.protein, carbs: m.carbs, fat: m.fat, fiber: m.fiber, date: photoDate, time: photoTime, type: photoType, description: 'Scanned from nutrition label' }];
     pendingDescription = m.meal_name;
     document.getElementById('previewName').textContent = m.meal_name;
     document.getElementById('multiPreview').style.display = 'none';
@@ -522,7 +526,7 @@ async function handlePhotoInput(input) {
 }
 
 function updatePhotoServings() {
-  if (!photoPerServing) return;
+  if (!photoPerServing || !pendingMeals || !pendingMeals[0]) return;
   const count = parseFloat(document.getElementById('servingCount').value) || 1;
   const m = photoPerServing;
   const cal = Math.round(m.calories * count);
@@ -537,7 +541,8 @@ function updatePhotoServings() {
   document.getElementById('pFiber').textContent = fiber;
   const name = count !== 1 ? `${m.meal_name} (×${count})` : m.meal_name;
   document.getElementById('previewName').textContent = name;
-  pendingMeals = [{ meal_name: name, calories: cal, protein: prot, carbs, fat, fiber }];
+  const existing = pendingMeals[0];
+  pendingMeals = [{ meal_name: name, calories: cal, protein: prot, carbs, fat, fiber, date: existing.date, time: existing.time, type: existing.type, description: existing.description }];
 }
 
 async function estimateMeal() {
