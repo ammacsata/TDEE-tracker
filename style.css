@@ -1707,3 +1707,27 @@ body {
   height: 0;
   border-top: 2px dashed;
 }
+
+/* Chart tooltip */
+.chart-tooltip {
+  display: none;
+  position: fixed;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-1);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  pointer-events: none;
+  z-index: 200;
+  white-space: nowrap;
+  font-family: var(--font-display);
+}
+.chart-tooltip .tt-label {
+  font-size: 10px;
+  color: var(--text-3);
+  font-family: var(--font-body);
+  font-weight: 400;
+}

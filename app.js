@@ -1,4 +1,4 @@
-// nutritracker v1.25 — app.js
+// nutritracker v1.26 — app.js
 const LS_CREDS = 'nutritracker_creds';
 const LS_SESSION = 'nutritracker_session';
 const SUPA_URL = 'https://whdamcifxsjfmnzgdrxe.supabase.co';
@@ -437,44 +437,64 @@ async function callClaude(key, body) {
   return data;
 }
 let photoPerServing = null;
+let pendingPhotoBase64 = null;
+let pendingPhotoMediaType = null;
 
-async function handlePhotoInput(input) {
+function handlePhotoSelect(input) {
   if (!input.files || !input.files[0]) return;
-  const key = document.getElementById('apiKey').value.trim();
-  if (!key) { input.value = ''; return; }
   const file = input.files[0];
   input.value = '';
-  // Convert to base64
-  const base64 = await new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result.split(',')[1]);
-    reader.onerror = () => reject(new Error('Failed to read image'));
-    reader.readAsDataURL(file);
-  });
-  const mediaType = file.type || 'image/jpeg';
+  const reader = new FileReader();
+  reader.onload = () => {
+    const dataUrl = reader.result;
+    pendingPhotoBase64 = dataUrl.split(',')[1];
+    pendingPhotoMediaType = file.type || 'image/jpeg';
+    document.getElementById('photoPreviewImg').src = dataUrl;
+    document.getElementById('photoContext').value = '';
+    document.getElementById('photoPreviewArea').style.display = '';
+  };
+  reader.readAsDataURL(file);
+}
+
+function cancelPhotoPreview() {
+  document.getElementById('photoPreviewArea').style.display = 'none';
+  pendingPhotoBase64 = null;
+  pendingPhotoMediaType = null;
+}
+
+async function processPhotoScan() {
+  if (!pendingPhotoBase64) return;
+  const key = document.getElementById('apiKey').value.trim();
+  if (!key) return;
+  const context = document.getElementById('photoContext').value.trim();
+  const base64 = pendingPhotoBase64;
+  const mediaType = pendingPhotoMediaType;
+  document.getElementById('photoPreviewArea').style.display = 'none';
   document.getElementById('estimating').classList.add('show');
   document.getElementById('errorMsg').classList.remove('show');
   document.getElementById('previewCard').classList.remove('show');
   try {
     checkRateLimit();
+    const userText = context ? `Read this nutrition label. Additional context: ${context}` : 'Read this nutrition label and extract the per-serving macros.';
     const data = await callClaude(key, {
       model: 'claude-sonnet-4-6', max_tokens: 400,
-      system: `You read nutrition labels from photos. Extract the nutrition facts and respond ONLY with JSON:\n{"meal_name":"product name","servings_per_container":number,"serving_size":"description","calories":number,"protein":number,"carbs":number,"fat":number,"fiber":number}\nAll macro values should be PER SERVING. If you can read the product name, use it. If not, describe it. All numbers integers. No markdown.`,
+      system: `You read nutrition labels from photos. Extract the nutrition facts and respond ONLY with JSON:\n{"meal_name":"product name","servings_per_container":number,"serving_size":"description","calories":number,"protein":number,"carbs":number,"fat":number,"fiber":number}\nAll macro values should be PER SERVING. If you can read the product name, use it. If not, describe it. All numbers integers. No markdown. If the user provides additional context (e.g. "I ate half"), adjust the servings_per_container or note it but keep per-serving values unchanged.`,
       messages: [{
         role: 'user',
         content: [
           { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
-          { type: 'text', text: 'Read this nutrition label and extract the per-serving macros.' }
+          { type: 'text', text: userText }
         ]
       }]
     });
+    pendingPhotoBase64 = null;
+    pendingPhotoMediaType = null;
     const text = data.content.filter(b => b.type === 'text').map(b => b.text).join('');
     const match = text.match(/\{[\s\S]*?"meal_name"[\s\S]*?\}/);
     if (!match) throw new Error('Could not read nutrition label. Try a clearer photo.');
     let r;
     try { r = JSON.parse(match[0].replace(/```json|```/g,'').trim()); }
     catch(e) { throw new Error('Could not parse nutrition data. Try again.'); }
-    // Store per-serving values
     photoPerServing = {
       meal_name: r.meal_name,
       calories: r.calories || 0,
@@ -485,13 +505,12 @@ async function handlePhotoInput(input) {
       servings_per_container: r.servings_per_container || 1,
       serving_size: r.serving_size || '1 serving'
     };
-    // Show preview with 1 serving
     const m = photoPerServing;
     const now = new Date();
     const photoDate = editForDate || fmtDate(now);
     const photoTime = now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
     const photoType = getMealType();
-    pendingMeals = [{ meal_name: m.meal_name, calories: m.calories, protein: m.protein, carbs: m.carbs, fat: m.fat, fiber: m.fiber, date: photoDate, time: photoTime, type: photoType, description: 'Scanned from nutrition label' }];
+    pendingMeals = [{ meal_name: m.meal_name, calories: m.calories, protein: m.protein, carbs: m.carbs, fat: m.fat, fiber: m.fiber, date: photoDate, time: photoTime, type: photoType, description: context ? 'Scanned: ' + context : 'Scanned from nutrition label' }];
     pendingDescription = m.meal_name;
     document.getElementById('previewName').textContent = m.meal_name;
     document.getElementById('multiPreview').style.display = 'none';
@@ -501,7 +520,6 @@ async function handlePhotoInput(input) {
     document.getElementById('pFat').textContent = m.fat;
     document.getElementById('pFiber').textContent = m.fiber;
     document.getElementById('previewNote').textContent = `Per serving: ${m.serving_size}`;
-    // Show serving selector
     const sel = document.getElementById('servingSelector');
     sel.style.display = '';
     document.getElementById('servingCount').value = 1;
@@ -510,8 +528,8 @@ async function handlePhotoInput(input) {
     noteInputVisible = false;
     document.getElementById('calInline').classList.remove('show');
     document.getElementById('calToggleLabel').textContent = 'Add a calibration note';
+    document.getElementById('servingSelector').style.display = '';
     document.getElementById('previewCard').classList.add('show');
-    // Get meal analysis
     document.getElementById('mealAnalysis').style.display = 'none';
     const today = fmtDate(new Date());
     const todayMeals = meals.filter(m => m.date === today);
@@ -696,7 +714,7 @@ async function confirmLog() {
   renderToday(); switchTab('today');
 }
 
-function cancelEstimate() { document.getElementById('previewCard').classList.remove('show'); document.getElementById('servingSelector').style.display='none'; pendingMeals = null; pendingDescription = null; photoPerServing = null; editReplacingId = null; clearDateBanner(); }
+function cancelEstimate() { document.getElementById('previewCard').classList.remove('show'); document.getElementById('servingSelector').style.display='none'; document.getElementById('photoPreviewArea').style.display='none'; pendingMeals = null; pendingDescription = null; photoPerServing = null; pendingPhotoBase64 = null; editReplacingId = null; clearDateBanner(); }
 
 async function deleteMeal(id) {
   const meal = meals.find(m => m.id === id);
@@ -1270,6 +1288,14 @@ function rollingAvg(data, windowSize) {
   });
 }
 
+function getAvgWeight14d() {
+  if (weightLog.length === 0) return null;
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 14);
+  const recent = weightLog.filter(w => new Date(w.date + 'T12:00:00') >= cutoff);
+  if (recent.length === 0) return weightLog[weightLog.length - 1].value;
+  return Math.round(recent.reduce((a, w) => a + w.value, 0) / recent.length * 10) / 10;
+}
+
 function drawChart(canvasId, datasets, labels, goalLine, minVal, maxValOverride, secondLine, avgLine) {
   const canvas = document.getElementById(canvasId);
   const ctx = canvas.getContext('2d');
@@ -1337,8 +1363,8 @@ function drawChart(canvasId, datasets, labels, goalLine, minVal, maxValOverride,
     if (ds.thin) { ctx.setLineDash([]); return; }
     ds.data.forEach((val,i) => { if(val>0){ctx.beginPath();ctx.fillStyle=ds.color;ctx.arc(padL+i*step,padT+chartH-((val-floor)/range)*chartH,3.5,0,Math.PI*2);ctx.fill();} });
   });
-  // Store metadata for click navigation
-  chartMeta[canvasId] = { labels, step, padL, w };
+  // Store metadata for click navigation and tooltips
+  chartMeta[canvasId] = { labels, step, padL, w, datasets: datasets.map(ds => ({data:[...ds.data], color:ds.color, label:ds.label||''})) };
 }
 
 function drawBarChart(canvasId, datasets, labels, goalLine) {
@@ -1405,8 +1431,8 @@ function drawBarChart(canvasId, datasets, labels, goalLine) {
       ctx.fill();
     });
   });
-  // Store metadata for click navigation
-  chartMeta[canvasId] = { labels, groupWidth, groupGap, padL, w };
+  // Store metadata for click navigation and tooltips
+  chartMeta[canvasId] = { labels, groupWidth, groupGap, padL, w, datasets: datasets.map(ds => ({data:[...ds.data], color:ds.color, label:ds.label||''})) };
 }
 
 function renderTrends() {
@@ -1923,7 +1949,7 @@ async function saveGoalWeight() {
   if (goalMode_ === 'rate') {
     goalRate = parseFloat(document.getElementById('goalRate').value) || 1.0;
     // Calculate target date from rate
-    const currentW = weightLog.length > 0 ? weightLog[weightLog.length - 1].value : null;
+    const currentW = getAvgWeight14d();
     if (goalWeight && currentW && goalRate > 0) {
       const lbsToChange = Math.abs(currentW - goalWeight);
       const weeksNeeded = lbsToChange / goalRate;
@@ -1945,7 +1971,7 @@ async function saveGoalWeight() {
 function renderGoalWeight() {
   const row = document.getElementById('goalWeightRow');
   if (!goalWeight || !goalDate) { row.style.display = 'none'; return; }
-  const currentW = weightLog.length > 0 ? weightLog[weightLog.length - 1].value : null;
+  const currentW = getAvgWeight14d();
   if (!currentW) { row.style.display = 'none'; return; }
   const tdee = calculateTDEE();
   const targetDate = new Date(goalDate + 'T12:00:00');
@@ -2003,7 +2029,7 @@ function showGoalDetail() {
 function renderGoalWeightSummary() {
   const el = document.getElementById('goalWeightSummary');
   if (!goalWeight || !goalDate) { el.style.display = 'none'; return; }
-  const currentW = weightLog.length > 0 ? weightLog[weightLog.length - 1].value : null;
+  const currentW = getAvgWeight14d();
   if (!currentW) { el.textContent = 'Log your weight to see progress.'; el.style.display = ''; return; }
   const lbsToChange = currentW - goalWeight;
   const targetDate = new Date(goalDate + 'T12:00:00');
@@ -2610,10 +2636,55 @@ function renderTDEEChart() {
   if (chartMeta['tdeeChart']) chartMeta['tdeeChart'].dates = tdeePoints.map(p => p.date);
 }
 
+// Chart tooltip
+function showChartTooltip(canvasId, e) {
+  const meta = chartMeta[canvasId];
+  if (!meta || !meta.datasets || meta.datasets.length === 0) return;
+  const canvas = document.getElementById(canvasId);
+  const rect = canvas.getBoundingClientRect();
+  const clientX = e.clientX || (e.touches && e.touches[0]?.clientX) || 0;
+  const clientY = e.clientY || (e.touches && e.touches[0]?.clientY) || 0;
+  const clickX = clientX - rect.left;
+  // Find nearest data point index
+  let nearestIdx = 0, nearestDist = Infinity;
+  const numPoints = meta.labels?.length || 0;
+  for (let i = 0; i < numPoints; i++) {
+    let pointX;
+    if (meta.step != null) pointX = meta.padL + i * meta.step;
+    else if (meta.groupWidth != null) pointX = meta.padL + i * (meta.groupWidth + (meta.groupGap||0)) + meta.groupWidth/2;
+    else continue;
+    const dist = Math.abs(clickX - pointX);
+    if (dist < nearestDist) { nearestDist = dist; nearestIdx = i; }
+  }
+  if (nearestDist > 50) { hideChartTooltip(); return; }
+  // Build tooltip content
+  const label = meta.labels[nearestIdx] || '';
+  const values = meta.datasets.filter(ds => ds.label && ds.data[nearestIdx] > 0).map(ds => `<span style="color:${ds.color}">${ds.label}: ${ds.data[nearestIdx]}</span>`);
+  if (values.length === 0) { hideChartTooltip(); return; }
+  const tooltip = document.getElementById('chartTooltip');
+  tooltip.innerHTML = `<div class="tt-label">${esc(label)}</div>${values.join('<br>')}`;
+  tooltip.style.display = '';
+  // Position near cursor
+  const tx = Math.min(clientX + 12, window.innerWidth - 150);
+  const ty = clientY - 40;
+  tooltip.style.left = tx + 'px';
+  tooltip.style.top = ty + 'px';
+}
+
+function hideChartTooltip() {
+  document.getElementById('chartTooltip').style.display = 'none';
+}
+
 // Chart click navigation
 ['calChart','macroChart','macroPctChart','weightChart','tdeeChart'].forEach(id => {
   const el = document.getElementById(id);
   if (!el) return;
+  // Tooltip on hover/touch
+  el.addEventListener('mousemove', e => showChartTooltip(id, e));
+  el.addEventListener('mouseleave', hideChartTooltip);
+  el.addEventListener('touchstart', e => showChartTooltip(id, e), {passive:true});
+  el.addEventListener('touchend', () => setTimeout(hideChartTooltip, 1500), {passive:true});
+  // Click to navigate
   el.addEventListener('click', e => {
     const meta = chartMeta[id];
     if (!meta || !meta.dates) return;

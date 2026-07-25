@@ -29,7 +29,7 @@
 
   <div class="container">
     <div class="logo-row">
-      <div class="logo">nutri<span>tracker</span> <span style="font-size:11px;font-weight:400;color:var(--text-3);margin-left:6px;">v1.25</span></div>
+      <div class="logo">nutri<span>tracker</span> <span style="font-size:11px;font-weight:400;color:var(--text-3);margin-left:6px;">v1.26</span></div>
       <div style="display:flex;align-items:center;gap:12px;">
         <div class="status-pill">
           <div class="dot" id="syncDot"></div>
@@ -80,7 +80,19 @@
         </div>
         <div class="estimate-row" style="margin-top:6px;">
           <button class="estimate-btn" id="photoBtn" onclick="document.getElementById('photoInput').click()" style="background:var(--text-2);">Scan nutrition label</button>
-          <input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none;" onchange="handlePhotoInput(this)" />
+          <input type="file" id="photoInput" accept="image/*" style="display:none;" onchange="handlePhotoSelect(this)" />
+        </div>
+        <div id="photoPreviewArea" style="display:none;margin-top:12px;">
+          <div style="display:flex;gap:12px;align-items:flex-start;">
+            <img id="photoPreviewImg" style="width:100px;height:100px;object-fit:cover;border-radius:var(--radius-sm);border:1px solid var(--border);" />
+            <div style="flex:1;">
+              <textarea id="photoContext" class="meal-textarea" style="min-height:60px;font-size:13px;" placeholder="Optional: add context (e.g. 'I ate half', 'family size bag', 'ignore the drink')"></textarea>
+            </div>
+          </div>
+          <div class="estimate-row" style="margin-top:8px;">
+            <button class="estimate-btn" onclick="processPhotoScan()">Analyze</button>
+            <button class="cancel-btn" onclick="cancelPhotoPreview()" style="width:auto;padding:10px 18px;">Cancel</button>
+          </div>
         </div>
         <p class="status-line" id="estimating">Analysing your meal…</p>
         <p class="error-line" id="errorMsg"></p>
@@ -424,6 +436,7 @@
     <button onclick="performUndo()">Undo</button>
   </div>
   <div class="quick-toast" id="quickToast"></div>
+  <div class="chart-tooltip" id="chartTooltip"></div>
   <div class="edit-modal-overlay" id="editOverlay" style="display:none;" onclick="if(event.target===this)closeEditModal()">
     <div class="edit-modal">
       <div class="edit-modal-title" id="editModalTitle">Edit meal</div>
