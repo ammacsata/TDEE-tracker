@@ -1,9 +1,9 @@
-const CACHE_NAME = 'nutritracker-v1.20';
+const CACHE_NAME = 'nutritracker-v1.26';
 const BASE = '/nutritracker/';
 const ASSETS = [
   BASE + 'index.html',
-  BASE + 'style.css',
-  BASE + 'app.js'
+  BASE + 'style.css?v=1.26',
+  BASE + 'app.js?v=1.26'
 ];
 
 self.addEventListener('install', event => {
@@ -24,18 +24,15 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
-  // Don't cache API calls or fonts
   if (url.hostname.includes('supabase.co') || url.hostname.includes('anthropic.com') || url.hostname.includes('googleapis.com')) {
     return;
   }
-  // For navigation requests (opening the app), serve index.html
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request).catch(() => caches.match(BASE + 'index.html'))
     );
     return;
   }
-  // For other requests, try network first, fall back to cache
   event.respondWith(
     fetch(event.request).then(response => {
       if (response.ok) {
