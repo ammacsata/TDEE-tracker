@@ -2639,13 +2639,13 @@ function renderTDEEChart() {
 // Chart tooltip
 function showChartTooltip(canvasId, e) {
   const meta = chartMeta[canvasId];
+  console.log('Tooltip:', canvasId, 'meta:', !!meta, 'datasets:', meta?.datasets?.length, 'labels:', meta?.labels?.length);
   if (!meta || !meta.datasets || meta.datasets.length === 0) return;
   const canvas = document.getElementById(canvasId);
   const rect = canvas.getBoundingClientRect();
   const clientX = e.clientX || (e.touches && e.touches[0]?.clientX) || 0;
   const clientY = e.clientY || (e.touches && e.touches[0]?.clientY) || 0;
   const clickX = clientX - rect.left;
-  // Find nearest data point index
   let nearestIdx = 0, nearestDist = Infinity;
   const numPoints = meta.labels?.length || 0;
   for (let i = 0; i < numPoints; i++) {
@@ -2656,15 +2656,15 @@ function showChartTooltip(canvasId, e) {
     const dist = Math.abs(clickX - pointX);
     if (dist < nearestDist) { nearestDist = dist; nearestIdx = i; }
   }
+  console.log('  nearestIdx:', nearestIdx, 'nearestDist:', nearestDist, 'step:', meta.step, 'clickX:', clickX);
   if (nearestDist > 50) { hideChartTooltip(); return; }
-  // Build tooltip content
   const label = meta.labels[nearestIdx] || '';
   const values = meta.datasets.filter(ds => ds.label && ds.data[nearestIdx] > 0).map(ds => `<span style="color:${ds.color}">${ds.label}: ${ds.data[nearestIdx]}</span>`);
+  console.log('  label:', label, 'values:', values.length);
   if (values.length === 0) { hideChartTooltip(); return; }
   const tooltip = document.getElementById('chartTooltip');
   tooltip.innerHTML = `<div class="tt-label">${esc(label)}</div>${values.join('<br>')}`;
-  tooltip.style.display = '';
-  // Position near cursor
+  tooltip.style.display = 'block';
   const tx = Math.min(clientX + 12, window.innerWidth - 150);
   const ty = clientY - 40;
   tooltip.style.left = tx + 'px';
