@@ -230,6 +230,7 @@ async function init() {
   checkReady();
   renderToday();
   renderFavorites();
+  registerChartListeners();
 }
 
 async function connectSupabase() {
@@ -2675,38 +2676,39 @@ function hideChartTooltip() {
   document.getElementById('chartTooltip').style.display = 'none';
 }
 
-// Chart click navigation
-['calChart','macroChart','macroPctChart','weightChart','tdeeChart'].forEach(id => {
-  const el = document.getElementById(id);
-  if (!el) return;
-  // Tooltip on hover/touch
-  el.addEventListener('mousemove', e => showChartTooltip(id, e));
-  el.addEventListener('mouseleave', hideChartTooltip);
-  el.addEventListener('touchstart', e => showChartTooltip(id, e), {passive:true});
-  el.addEventListener('touchend', () => setTimeout(hideChartTooltip, 1500), {passive:true});
-  // Click to navigate
-  el.addEventListener('click', e => {
-    const meta = chartMeta[id];
-    if (!meta || !meta.dates) return;
-    const rect = el.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    // Find nearest data point
-    let nearestIdx = 0, nearestDist = Infinity;
-    meta.dates.forEach((d, i) => {
-      let pointX;
-      if (meta.step) {
-        pointX = meta.padL + i * meta.step;
-      } else if (meta.groupWidth != null) {
-        pointX = meta.padL + i * (meta.groupWidth + (meta.groupGap||0)) + meta.groupWidth/2;
-      } else return;
-      const dist = Math.abs(clickX - pointX);
-      if (dist < nearestDist) { nearestDist = dist; nearestIdx = i; }
+// Chart click navigation and tooltips - registered in init()
+function registerChartListeners() {
+  console.log('Registering chart listeners...');
+  ['calChart','macroChart','macroPctChart','weightChart','tdeeChart'].forEach(id => {
+    const el = document.getElementById(id);
+    console.log('  Chart:', id, 'found:', !!el);
+    if (!el) return;
+    el.addEventListener('mousemove', e => showChartTooltip(id, e));
+    el.addEventListener('mouseleave', hideChartTooltip);
+    el.addEventListener('touchstart', e => showChartTooltip(id, e), {passive:true});
+    el.addEventListener('touchend', () => setTimeout(hideChartTooltip, 1500), {passive:true});
+    el.addEventListener('click', e => {
+      const meta = chartMeta[id];
+      if (!meta || !meta.dates) return;
+      const rect = el.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      let nearestIdx = 0, nearestDist = Infinity;
+      (meta.dates||[]).forEach((d, i) => {
+        let pointX;
+        if (meta.step) {
+          pointX = meta.padL + i * meta.step;
+        } else if (meta.groupWidth != null) {
+          pointX = meta.padL + i * (meta.groupWidth + (meta.groupGap||0)) + meta.groupWidth/2;
+        } else return;
+        const dist = Math.abs(clickX - pointX);
+        if (dist < nearestDist) { nearestDist = dist; nearestIdx = i; }
+      });
+      if (nearestDist < 40 && meta.dates[nearestIdx]) {
+        viewDate = new Date(meta.dates[nearestIdx] + 'T12:00:00');
+        switchTab('today');
+      }
     });
-    if (nearestDist < 40 && meta.dates[nearestIdx]) {
-      viewDate = new Date(meta.dates[nearestIdx] + 'T12:00:00');
-      switchTab('today');
-    }
   });
-});
+}
 
 init();
