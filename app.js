@@ -1,4 +1,4 @@
-// nutritracker v1.26 — app.js
+// nutritracker v1.27 — app.js
 const LS_CREDS = 'nutritracker_creds';
 const LS_SESSION = 'nutritracker_session';
 const SUPA_URL = 'https://whdamcifxsjfmnzgdrxe.supabase.co';
@@ -250,6 +250,8 @@ async function connectSupabase() {
       if (s.theme) loadThemeFromSupabase(s.theme);
       if (s.goal_weight) { goalWeight = s.goal_weight; document.getElementById('goalWeight').value = goalWeight; }
       if (s.goal_date) { goalDate = s.goal_date; document.getElementById('goalDate').value = goalDate; }
+      if (s.goal_mode) { goalMode_ = s.goal_mode; }
+      if (s.goal_rate) { goalRate = parseFloat(s.goal_rate); }
       document.getElementById('goalCal').value = goals.cal;
       document.getElementById('goalProt').value = goals.prot;
       document.getElementById('goalCarbs').value = goals.carbs;
@@ -1529,6 +1531,10 @@ function renderTrends() {
     renderWeightChart();
     renderTDEEChart();
   }
+  // Goals
+  if (sub === 'goals') {
+    renderGoalsTab();
+  }
 }
 
 function setCompare(mode) {
@@ -1671,8 +1677,9 @@ function renderSummary(days, dwd, sum, n) {
   } else { defRow.style.display = 'none'; }
 }
 
-function renderDonut(sum, n) {
-  const canvas = document.getElementById('donutChart');
+function renderDonut(sum, n, canvasId, legendId) {
+  const canvas = document.getElementById(canvasId || 'donutChart');
+  const legendEl = document.getElementById(legendId || 'donutLegend');
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
   const size = 140;
@@ -1683,7 +1690,7 @@ function renderDonut(sum, n) {
   const protCal = sum.prot * 4, carbCal = sum.carbs * 4, fatCal = sum.fat * 9;
   const total = protCal + carbCal + fatCal;
   if (total === 0) {
-    document.getElementById('donutLegend').innerHTML = '<span style="font-size:13px;color:var(--text-3);">No data yet</span>';
+    legendEl.innerHTML = '<span style="font-size:13px;color:var(--text-3);">No data yet</span>';
     return;
   }
   const pcts = [protCal/total, carbCal/total, fatCal/total];
@@ -1716,7 +1723,7 @@ function renderDonut(sum, n) {
   const targetTotal = targetProtCal + targetCarbCal + targetFatCal;
   const targetPcts = targetTotal > 0 ? [targetProtCal/targetTotal, targetCarbCal/targetTotal, targetFatCal/targetTotal] : [0,0,0];
 
-  document.getElementById('donutLegend').innerHTML = labels.map((l, i) =>
+  legendEl.innerHTML = labels.map((l, i) =>
     `<div class="donut-legend-item"><span class="donut-legend-dot" style="background:${colors[i]}"></span>${l}<span class="donut-legend-pct">${Math.round(pcts[i]*100)}%/${Math.round(targetPcts[i]*100)}%</span></div>`
   ).join('');
 }
@@ -1862,67 +1869,45 @@ function renderWeightChart() {
 
 function renderTDEE() {
   const tdeeRow = document.getElementById('tdeeRow');
-  if (weightLog.length < 2) { tdeeRow.style.display = 'none'; return; }
-  const refDate = viewDate;
-  const refDs = fmtDate(refDate);
-  // Get 14 days of calorie data ending on the viewed date
-  const days14 = [];
-  for (let i = 13; i >= 0; i--) {
+  if (weightLog.length < 2) { tdeeRow.style.display = 'none'; return null; }
+  const tdee = computeSmoothedTDEE(viewDate);
+  if (!tdee) { tdeeRow.style.display = 'none'; return null; }
+  document.getElementById('tdeeValue').textContent = tdee;
+  tdeeRow.style.display = '';
+  return tdee;
+}
+
+function computeSmoothedTDEE(refDate) {
+  // Compute TDEE for each of the last 7 days and average for stability
+  const estimates = [];
+  for (let offset = 0; offset < 7; offset++) {
+    const d = new Date(refDate); d.setDate(d.getDate() - offset);
+    const est = computeSingleTDEE(d);
+    if (est) estimates.push(est);
+  }
+  if (estimates.length < 3) return null;
+  return Math.round(estimates.reduce((a,v) => a+v, 0) / estimates.length);
+}
+
+function computeSingleTDEE(refDate) {
+  // Use 28-day window for more stable regression
+  const days28 = [];
+  for (let i = 27; i >= 0; i--) {
     const d = new Date(refDate); d.setDate(d.getDate() - i);
     const ds = fmtDate(d);
     const dm = meals.filter(m => m.date === ds);
     const dayEx = exerciseLog.filter(e => e.date === ds);
     const cal = dm.reduce((a,m) => a + m.calories, 0);
     const ex = dayEx.reduce((a,e) => a + e.calories_burned, 0);
-    if (cal > 0) days14.push({ date: ds, cal, ex });
+    if (cal > 0) days28.push({ cal, ex });
   }
-  if (days14.length < 7) { tdeeRow.style.display = 'none'; return; }
-  // Get weight data for 15 days before viewed date
-  const cutoff = new Date(refDate); cutoff.setDate(cutoff.getDate() - 15);
+  if (days28.length < 10) return null;
+  const cutoff = new Date(refDate); cutoff.setDate(cutoff.getDate() - 29);
   const recentWeight = weightLog.filter(w => {
     const wd = new Date(w.date + 'T12:00:00');
     return wd >= cutoff && wd <= refDate;
   });
-  if (recentWeight.length < 2) { tdeeRow.style.display = 'none'; return; }
-  const startDate = new Date(recentWeight[0].date + 'T12:00:00');
-  const points = recentWeight.map(w => ({
-    x: (new Date(w.date + 'T12:00:00') - startDate) / (1000*60*60*24),
-    y: w.value
-  }));
-  const n2 = points.length;
-  const sumX = points.reduce((a,p) => a+p.x, 0);
-  const sumY = points.reduce((a,p) => a+p.y, 0);
-  const sumXY = points.reduce((a,p) => a+p.x*p.y, 0);
-  const sumX2 = points.reduce((a,p) => a+p.x*p.x, 0);
-  const slope = (n2*sumXY - sumX*sumY) / (n2*sumX2 - sumX*sumX);
-  if (!isFinite(slope) || isNaN(slope)) { tdeeRow.style.display = 'none'; return; }
-  // TDEE = avg daily intake - (daily weight change in lbs × 3500 cal/lb)
-  // If losing weight (negative slope), TDEE > intake. If gaining, TDEE < intake.
-  const avgIntake = days14.reduce((a,d) => a + d.cal, 0) / days14.length;
-  const avgExercise = days14.reduce((a,d) => a + d.ex, 0) / days14.length;
-  const tdee = Math.round(avgIntake - avgExercise - (slope * 3500));
-  if (tdee < 500 || tdee > 8000) { tdeeRow.style.display = 'none'; return null; } // sanity check
-  document.getElementById('tdeeValue').textContent = tdee;
-  tdeeRow.style.display = '';
-  return tdee;
-}
-
-function calculateTDEE() {
-  if (weightLog.length < 2) return null;
-  const days14 = [];
-  for (let i = 13; i >= 0; i--) {
-    const d = new Date(); d.setDate(d.getDate() - i);
-    const ds = fmtDate(d);
-    const dm = meals.filter(m => m.date === ds);
-    const dayEx = exerciseLog.filter(e => e.date === ds);
-    const cal = dm.reduce((a,m) => a + m.calories, 0);
-    const ex = dayEx.reduce((a,e) => a + e.calories_burned, 0);
-    if (cal > 0) days14.push({ cal, ex });
-  }
-  if (days14.length < 7) return null;
-  const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 15);
-  const recentWeight = weightLog.filter(w => new Date(w.date + 'T12:00:00') >= cutoff);
-  if (recentWeight.length < 2) return null;
+  if (recentWeight.length < 3) return null;
   const startDate = new Date(recentWeight[0].date + 'T12:00:00');
   const points = recentWeight.map(w => ({ x: (new Date(w.date+'T12:00:00')-startDate)/(1000*60*60*24), y: w.value }));
   const n2 = points.length;
@@ -1930,10 +1915,14 @@ function calculateTDEE() {
   const sumXY = points.reduce((a,p) => a+p.x*p.y, 0), sumX2 = points.reduce((a,p) => a+p.x*p.x, 0);
   const slope = (n2*sumXY - sumX*sumY) / (n2*sumX2 - sumX*sumX);
   if (!isFinite(slope) || isNaN(slope)) return null;
-  const avgIntake = days14.reduce((a,d) => a + d.cal, 0) / days14.length;
-  const avgExercise = days14.reduce((a,d) => a + d.ex, 0) / days14.length;
+  const avgIntake = days28.reduce((a,d) => a + d.cal, 0) / days28.length;
+  const avgExercise = days28.reduce((a,d) => a + d.ex, 0) / days28.length;
   const tdee = Math.round(avgIntake - avgExercise - (slope * 3500));
   return (tdee >= 500 && tdee <= 8000) ? tdee : null;
+}
+
+function calculateTDEE() {
+  return computeSmoothedTDEE(new Date());
 }
 
 function setGoalMode(mode) {
@@ -1963,8 +1952,12 @@ async function saveGoalWeight() {
     goalDate = document.getElementById('goalDate').value || null;
   }
   if (supaReady && currentUser) {
-    try { await supa('settings','PATCH',{query:'user_id=eq.'+currentUser.id,body:{goal_weight:goalWeight,goal_date:goalDate}}); } catch(e){}
+    try { await supa('settings','PATCH',{query:'user_id=eq.'+currentUser.id,body:{goal_weight:goalWeight,goal_date:goalDate,goal_mode:goalMode_,goal_rate:goalRate}}); } catch(e){}
   }
+  // Sync to Goals tab
+  document.getElementById('goalWeightGoals').value = goalWeight || '';
+  document.getElementById('goalDateG').value = goalDate || '';
+  document.getElementById('goalRateG').value = goalRate;
   renderGoalWeight();
   renderGoalWeightSummary();
 }
@@ -2046,6 +2039,102 @@ function renderGoalWeightSummary() {
   }
   el.innerHTML = html;
   el.style.display = '';
+}
+
+function setGoalModeG(mode) {
+  goalMode_ = mode;
+  document.getElementById('goalModeDateG').classList.toggle('active', mode === 'date');
+  document.getElementById('goalModeRateG').classList.toggle('active', mode === 'rate');
+  document.getElementById('goalByDateG').style.display = mode === 'date' ? '' : 'none';
+  document.getElementById('goalByRateG').style.display = mode === 'rate' ? '' : 'none';
+  // Sync Settings tab toggle
+  document.getElementById('goalModeDate').classList.toggle('active', mode === 'date');
+  document.getElementById('goalModeRate').classList.toggle('active', mode === 'rate');
+  document.getElementById('goalByDate').style.display = mode === 'date' ? '' : 'none';
+  document.getElementById('goalByRate').style.display = mode === 'rate' ? '' : 'none';
+  saveGoalWeightFromGoalsTab();
+}
+
+async function saveGoalWeightFromGoalsTab() {
+  goalWeight = parseFloat(document.getElementById('goalWeightGoals').value) || null;
+  if (goalMode_ === 'rate') {
+    goalRate = parseFloat(document.getElementById('goalRateG').value) || 1.0;
+    const currentW = getAvgWeight14d();
+    if (goalWeight && currentW && goalRate > 0) {
+      const lbsToChange = Math.abs(currentW - goalWeight);
+      const weeksNeeded = lbsToChange / goalRate;
+      const target = new Date(); target.setDate(target.getDate() + Math.round(weeksNeeded * 7));
+      goalDate = fmtDate(target);
+    }
+  } else {
+    goalDate = document.getElementById('goalDateG').value || null;
+  }
+  // Sync to Settings tab inputs
+  document.getElementById('goalWeight').value = goalWeight || '';
+  document.getElementById('goalDate').value = goalDate || '';
+  document.getElementById('goalRate').value = goalRate;
+  if (supaReady && currentUser) {
+    try { await supa('settings','PATCH',{query:'user_id=eq.'+currentUser.id,body:{goal_weight:goalWeight,goal_date:goalDate,goal_mode:goalMode_,goal_rate:goalRate}}); } catch(e){}
+  }
+  renderGoalsTab();
+  renderGoalWeight();
+  renderGoalWeightSummary();
+}
+
+function renderGoalsTab() {
+  const currentW = getAvgWeight14d();
+  const tdee = calculateTDEE();
+  // Sync inputs
+  document.getElementById('goalWeightGoals').value = goalWeight || '';
+  document.getElementById('goalDateG').value = goalDate || '';
+  document.getElementById('goalRateG').value = goalRate || 1.0;
+  document.getElementById('goalModeDateG').classList.toggle('active', goalMode_ === 'date');
+  document.getElementById('goalModeRateG').classList.toggle('active', goalMode_ === 'rate');
+  document.getElementById('goalByDateG').style.display = goalMode_ === 'date' ? '' : 'none';
+  document.getElementById('goalByRateG').style.display = goalMode_ === 'rate' ? '' : 'none';
+  // Weight progress
+  const area = document.getElementById('goalProgressArea');
+  if (!goalWeight || !currentW) {
+    area.innerHTML = '<p style="font-size:13px;color:var(--text-3);">Set a target weight below to see progress.</p>';
+  } else {
+    const startW = weightLog.length > 0 ? weightLog[0].value : currentW;
+    const totalChange = Math.abs(startW - goalWeight);
+    const progress = totalChange > 0 ? Math.min(100, Math.round(Math.abs(startW - currentW) / totalChange * 100)) : 0;
+    const lbsLeft = Math.abs(currentW - goalWeight);
+    const direction = currentW > goalWeight ? 'to lose' : currentW < goalWeight ? 'to gain' : '';
+    const daysLeft = goalDate ? Math.max(1, Math.round((new Date(goalDate+'T12:00:00') - new Date()) / (1000*60*60*24))) : null;
+    const weeksLeft = daysLeft ? Math.round(daysLeft / 7 * 10) / 10 : null;
+    const lbsPerWeek = daysLeft ? (lbsLeft / daysLeft * 7) : null;
+    area.innerHTML = `
+      <div class="goal-progress-bar"><div class="goal-progress-fill" style="width:${progress}%"></div><div class="goal-progress-text">${progress}% — ${currentW} → ${goalWeight} lbs</div></div>
+      <div class="goal-stat-grid">
+        <div class="goal-stat"><div class="goal-stat-num">${lbsLeft.toFixed(1)}</div><div class="goal-stat-label">lbs ${direction}</div></div>
+        <div class="goal-stat"><div class="goal-stat-num">${weeksLeft || '—'}</div><div class="goal-stat-label">weeks left</div></div>
+        <div class="goal-stat"><div class="goal-stat-num">${lbsPerWeek ? lbsPerWeek.toFixed(1) : '—'}</div><div class="goal-stat-label">lbs/week</div></div>
+        <div class="goal-stat"><div class="goal-stat-num">${tdee || '—'}</div><div class="goal-stat-label">est. TDEE</div></div>
+      </div>`;
+  }
+  // Daily target
+  const targetEl = document.getElementById('goalTargetCal');
+  const detailsEl = document.getElementById('goalTargetDetails');
+  if (goalWeight && goalDate && currentW && tdee) {
+    const daysLeft = Math.max(1, Math.round((new Date(goalDate+'T12:00:00') - new Date()) / (1000*60*60*24)));
+    const lbsToChange = currentW - goalWeight;
+    const dailyDeficit = Math.round((lbsToChange * 3500) / daysLeft);
+    const targetCal = tdee - dailyDeficit;
+    targetEl.textContent = targetCal;
+    const defLabel = lbsToChange > 0 ? 'deficit' : 'surplus';
+    detailsEl.innerHTML = `TDEE: ${tdee} · ${Math.abs(dailyDeficit)} cal/day ${defLabel} · ${Math.abs(dailyDeficit*7).toLocaleString()} cal/week ${defLabel}`;
+  } else {
+    targetEl.textContent = tdee || '—';
+    detailsEl.textContent = tdee ? 'Set a weight goal to see your daily target' : 'Need more data to calculate TDEE';
+  }
+  // Render donut
+  const days14 = getDayTotals(14);
+  const dwd = days14.filter(d => d.cal > 0);
+  const n = dwd.length || 1;
+  const sum = dwd.reduce((a,d) => ({cal:a.cal+d.cal,prot:a.prot+d.prot,carbs:a.carbs+d.carbs,fat:a.fat+d.fat,fiber:a.fiber+d.fiber}),{cal:0,prot:0,carbs:0,fat:0,fiber:0});
+  renderDonut(sum, n, 'goalDonutChart', 'goalDonutLegend');
 }
 
 async function getMealAnalysis(mealItems, todayTotals) {
@@ -2640,7 +2729,6 @@ function renderTDEEChart() {
 // Chart tooltip
 function showChartTooltip(canvasId, e) {
   const meta = chartMeta[canvasId];
-  console.log('Tooltip:', canvasId, 'meta:', !!meta, 'datasets:', meta?.datasets?.length, 'labels:', meta?.labels?.length);
   if (!meta || !meta.datasets || meta.datasets.length === 0) return;
   const canvas = document.getElementById(canvasId);
   const rect = canvas.getBoundingClientRect();
@@ -2657,19 +2745,15 @@ function showChartTooltip(canvasId, e) {
     const dist = Math.abs(clickX - pointX);
     if (dist < nearestDist) { nearestDist = dist; nearestIdx = i; }
   }
-  console.log('  nearestIdx:', nearestIdx, 'nearestDist:', nearestDist, 'step:', meta.step, 'clickX:', clickX);
   if (nearestDist > 50) { hideChartTooltip(); return; }
   const label = meta.labels[nearestIdx] || '';
-  const values = meta.datasets.filter(ds => ds.label && ds.data[nearestIdx] > 0).map(ds => `<span style="color:${ds.color}">${ds.label}: ${ds.data[nearestIdx]}</span>`);
-  console.log('  label:', label, 'values:', values.length);
+  const values = meta.datasets.filter(ds => ds.data[nearestIdx] > 0).map(ds => `<span style="color:${ds.color}">${ds.label || 'Value'}: ${ds.data[nearestIdx]}</span>`);
   if (values.length === 0) { hideChartTooltip(); return; }
   const tooltip = document.getElementById('chartTooltip');
   tooltip.innerHTML = `<div class="tt-label">${esc(label)}</div>${values.join('<br>')}`;
   tooltip.style.display = 'block';
-  const tx = Math.min(clientX + 12, window.innerWidth - 150);
-  const ty = clientY - 40;
-  tooltip.style.left = tx + 'px';
-  tooltip.style.top = ty + 'px';
+  tooltip.style.left = Math.min(clientX + 12, window.innerWidth - 160) + 'px';
+  tooltip.style.top = (clientY - 40) + 'px';
 }
 
 function hideChartTooltip() {
@@ -2678,10 +2762,8 @@ function hideChartTooltip() {
 
 // Chart click navigation and tooltips - registered in init()
 function registerChartListeners() {
-  console.log('Registering chart listeners...');
   ['calChart','macroChart','macroPctChart','weightChart','tdeeChart'].forEach(id => {
     const el = document.getElementById(id);
-    console.log('  Chart:', id, 'found:', !!el);
     if (!el) return;
     el.addEventListener('mousemove', e => showChartTooltip(id, e));
     el.addEventListener('mouseleave', hideChartTooltip);

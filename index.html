@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Fraunces:opsz,wght@9..144,400;9..144,600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=1.26">
+  <link rel="stylesheet" href="style.css?v=1.27">
 </head>
 <body>
   <!-- AUTH OVERLAY -->
@@ -29,7 +29,7 @@
 
   <div class="container">
     <div class="logo-row">
-      <div class="logo">nutri<span>tracker</span> <span style="font-size:11px;font-weight:400;color:var(--text-3);margin-left:6px;">v1.26</span></div>
+      <div class="logo">nutri<span>tracker</span> <span style="font-size:11px;font-weight:400;color:var(--text-3);margin-left:6px;">v1.27</span></div>
       <div style="display:flex;align-items:center;gap:12px;">
         <div class="status-pill">
           <div class="dot" id="syncDot"></div>
@@ -326,6 +326,7 @@
         <button class="sub-tab" onclick="switchTrendSub('calories')">Calories</button>
         <button class="sub-tab" onclick="switchTrendSub('macros')">Macros</button>
         <button class="sub-tab" onclick="switchTrendSub('weight')">Weight</button>
+        <button class="sub-tab" onclick="switchTrendSub('goals')">Goals</button>
       </div>
 
       <!-- OVERVIEW -->
@@ -427,6 +428,52 @@
           <div class="empty" id="tdeeChartEmpty" style="padding:16px;">Need at least 3 weeks of calorie and weight data.</div>
         </div>
       </div>
+
+      <!-- GOALS -->
+      <div class="trend-sub" id="trend-goals">
+        <div class="card">
+          <div class="card-label">Weight goal</div>
+          <div id="goalProgressArea"></div>
+        </div>
+        <div class="card">
+          <div class="card-label">Daily target</div>
+          <div id="goalDailyTarget" style="text-align:center;padding:12px 0;">
+            <div style="font-family:var(--font-display);font-size:32px;font-weight:600;color:var(--text-1);" id="goalTargetCal">—</div>
+            <div style="font-size:13px;color:var(--text-3);">calories per day</div>
+          </div>
+          <div id="goalTargetDetails" style="font-size:13px;color:var(--text-2);"></div>
+        </div>
+        <div class="card">
+          <div class="card-label">Macro breakdown</div>
+          <div class="donut-wrap" id="goalDonutWrap">
+            <canvas id="goalDonutChart" width="140" height="140"></canvas>
+            <div class="donut-legend" id="goalDonutLegend"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-label">Configure</div>
+          <div class="goal-cell" style="margin-bottom:10px;"><span class="goal-label">Target weight (lbs)</span><input class="goal-input" type="number" id="goalWeightGoals" placeholder="165" onchange="saveGoalWeightFromGoalsTab()" /></div>
+          <div class="goal-mode-toggle" style="display:flex;gap:4px;margin-bottom:10px;">
+            <button class="range-btn" id="goalModeDateG" onclick="setGoalModeG('date')">By date</button>
+            <button class="range-btn" id="goalModeRateG" onclick="setGoalModeG('rate')">By rate</button>
+          </div>
+          <div id="goalByDateG">
+            <div class="goal-cell"><span class="goal-label">Target date</span><input class="goal-input" type="date" id="goalDateG" onchange="saveGoalWeightFromGoalsTab()" /></div>
+          </div>
+          <div id="goalByRateG" style="display:none;">
+            <div class="goal-cell"><span class="goal-label">Rate (lbs/week)</span>
+              <select class="goal-input" id="goalRateG" onchange="saveGoalWeightFromGoalsTab()" style="width:120px;">
+                <option value="0.25">0.25</option>
+                <option value="0.5">0.5</option>
+                <option value="0.75">0.75</option>
+                <option value="1.0">1.0</option>
+                <option value="1.25">1.25</option>
+                <option value="1.5">1.5</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
   </div>
@@ -480,7 +527,7 @@
     </div>
   </div>
 
-  <script src="app.js?v=1.26"></script>
+  <script src="app.js?v=1.27"></script>
   <script>
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch(() => {});
