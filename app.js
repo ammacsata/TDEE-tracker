@@ -200,37 +200,56 @@ function toggleAuthMode() {
 
 // ─── INIT ───
 async function init() {
+  console.log('[init] starting');
   loadTheme();
   try {
     const c = JSON.parse(localStorage.getItem(LS_CREDS) || '{}');
     if (c.apiKey) document.getElementById('apiKey').value = c.apiKey;
-  } catch(e) {}
+  } catch(e) { console.error('[init] creds parse error:', e); }
 
   // Try to restore session
-  const session = JSON.parse(localStorage.getItem(LS_SESSION) || '{}');
+  let session = {};
+  try { session = JSON.parse(localStorage.getItem(LS_SESSION) || '{}'); } catch(e) { console.error('[init] session parse error:', e); }
+  console.log('[init] has session:', !!session.access_token);
   if (session.access_token) {
     authToken = session.access_token;
     currentUser = session.user;
     document.getElementById('authOverlay').style.display = 'none';
     document.getElementById('userEmail').textContent = currentUser?.email || '';
     document.getElementById('signOutArea').style.display = '';
-    const refreshed = await refreshSession();
-    if (refreshed) {
-      await connectSupabase();
-    } else {
-      // Token expired, show auth
+    try {
+      console.log('[init] refreshing session...');
+      const refreshed = await refreshSession();
+      console.log('[init] refresh result:', refreshed);
+      if (refreshed) {
+        console.log('[init] calling connectSupabase...');
+        await connectSupabase();
+        console.log('[init] connectSupabase done');
+      } else {
+        console.log('[init] refresh failed, showing auth');
+        authToken = null; currentUser = null;
+        document.getElementById('authOverlay').style.display = '';
+        document.getElementById('signOutArea').style.display = 'none';
+        setSyncStatus('', '');
+      }
+    } catch(e) {
+      console.error('[init] auth error:', e);
       authToken = null; currentUser = null;
       document.getElementById('authOverlay').style.display = '';
       document.getElementById('signOutArea').style.display = 'none';
+      setSyncStatus('err', 'connection error');
     }
   } else {
+    console.log('[init] no session, showing auth');
     document.getElementById('authOverlay').style.display = '';
   }
 
+  console.log('[init] rendering...');
   checkReady();
   renderToday();
   renderFavorites();
   registerChartListeners();
+  console.log('[init] done');
 }
 
 async function connectSupabase() {
