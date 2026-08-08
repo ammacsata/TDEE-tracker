@@ -1664,7 +1664,8 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 .sub-tab {
-  padding: 8px 14px;
+  flex: 1;
+  padding: 8px 6px;
   font-size: 13px;
   font-weight: 500;
   font-family: var(--font-body);
@@ -1674,6 +1675,7 @@ body {
   color: var(--text-2);
   cursor: pointer;
   white-space: nowrap;
+  text-align: center;
 }
 .sub-tab.active {
   background: var(--accent);

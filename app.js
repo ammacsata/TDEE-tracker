@@ -1,4 +1,4 @@
-// nutritracker v1.30 — app.js
+// nutritracker v1.31 — app.js
 const LS_CREDS = 'nutritracker_creds';
 const LS_SESSION = 'nutritracker_session';
 const SUPA_URL = 'https://whdamcifxsjfmnzgdrxe.supabase.co';
@@ -617,7 +617,7 @@ async function runEstimation(key, desc) {
   }
   const memCtx = memoryNotes ? `\n\nPersonal calibration notes — apply these to FOOD estimates only:\n${memoryNotes}\n\nIMPORTANT: If any notes mention exercise, activity, or calories burned, do NOT subtract those from the food calorie estimate. Only adjust the food's own calories, protein, carbs, fat, and fiber based on food-related notes (portion sizes, cooking methods, ingredients). Exercise calories are tracked separately.` : '';
   const biasCtx = getEstimationBiasPrompt();
-  const recipeCtx = recipes.length > 0 ? `\n\nUser's saved recipes — if the meal matches one of these, use these exact values:\n${recipes.map(r => `- ${r.recipe_name}: ${r.calories} cal, ${r.protein}g P, ${r.carbs}g C, ${r.fat}g F, ${r.fiber}g f`).join('\n')}` : '';
+  const recipeCtx = recipes.length > 0 ? `\n\nUser's saved recipes — if the meal matches one of these, use these exact values:\n${recipes.map(r => `- ${r.recipe_name}: ${r.calories} cal, ${r.protein}g P, ${r.carbs}g C, ${r.fat}g F, ${r.fiber}g f, ${r.alcohol||0}g a`).join('\n')}` : '';
   try {
     const detectData = await callClaude(key, { model: 'claude-sonnet-4-6', max_tokens: 50, system: 'The user will describe a meal. Respond with ONLY "yes" or "no" — does this mention a specific restaurant, fast food chain, brand name, or packaged food product? No explanation.', messages: [{ role: 'user', content: desc }] });
     const needsSearch = detectData.content[0].text.trim().toLowerCase().startsWith('yes');
@@ -1169,6 +1169,7 @@ function renderToday() {
   const ds = fmtDate(viewDate);
   const isViewingToday = ds === fmtDate(new Date());
   document.getElementById('dateLabel').textContent = dateLabelFn(viewDate);
+  document.getElementById('vacationCallout').style.display = isVacationDay(ds) ? '' : 'none';
   const day = meals.filter(m => m.date === ds);
   const dayEx = exerciseLog.filter(e => e.date === ds);
   const exCal = dayEx.reduce((a,e) => a + e.calories_burned, 0);
@@ -1180,6 +1181,7 @@ function renderToday() {
   document.getElementById('totFat').textContent = t.fat;
   document.getElementById('totFiber').textContent = t.fiber;
   document.getElementById('totAlcohol').textContent = t.alcohol;
+  document.getElementById('totAlcoholCell').style.display = t.alcohol > 0 ? '' : 'none';
   const wEntry = weightLog.find(w => w.date === ds);
   const wRow = document.getElementById('todayWeightRow');
   if (wEntry) { document.getElementById('todayWeight').textContent = wEntry.value; wRow.style.display = ''; }
@@ -1593,7 +1595,7 @@ function renderTrends() {
       {data:days.map(d=>d.fat),color:macroColors.Fat,label:'Fat'},
       {data:days.map(d=>d.fiber),color:macroColors.Fiber,label:'Fiber'}
     ];
-    renderLegend(macroLid, Object.entries(macroColors).map(([k,v])=>({label:k,color:v})).concat([{label:'Alcohol',color:'#E879F9'}]), () => renderTrends());
+    renderLegend(macroLid, Object.entries(macroColors).map(([k,v])=>({label:k,color:v})), () => renderTrends());
     drawChart('macroChart',macroAllDS.filter(ds => isToggled(macroLid, ds.label)),labels,null);
 
     const pctLid = 'macroPctChartLegend';
@@ -1610,7 +1612,7 @@ function renderTrends() {
       {data:pctData.map(d=>d.fat),color:macroColors.Fat,label:'Fat'},
       {data:pctData.map(d=>d.fiber),color:macroColors.Fiber,label:'Fiber'}
     ];
-    renderLegend(pctLid, Object.entries(macroColors).map(([k,v])=>({label:k,color:v})).concat([{label:'Alcohol',color:'#E879F9'}]), () => renderTrends());
+    renderLegend(pctLid, Object.entries(macroColors).map(([k,v])=>({label:k,color:v})), () => renderTrends());
     drawBarChart('macroPctChart',pctAllDS.filter(ds => isToggled(pctLid, ds.label)),labels,100);
     const dates = days.map(d => d.date);
     if (chartMeta['macroChart']) chartMeta['macroChart'].dates = dates;
@@ -1639,13 +1641,20 @@ function renderTrends() {
     // Summary
     const alcDays = days.filter(d => d.alcohol > 0);
     const totalAlc = alcDays.reduce((a,d) => a + d.alcohol, 0);
-    const avgAlc = alcDays.length > 0 ? Math.round(totalAlc / days.length * 10) / 10 : 0;
     const daysWithAlc = alcDays.length;
     const alcCals = Math.round(totalAlc * 7);
+    // Period averages
+    const avg7 = (() => { const d7 = getDayTotals(7); const a = d7.reduce((s,d)=>s+d.alcohol,0); return Math.round(a/7*10)/10; })();
+    const avg14 = (() => { const d14 = getDayTotals(14); const a = d14.reduce((s,d)=>s+d.alcohol,0); return Math.round(a/14*10)/10; })();
+    const avg30 = (() => { const d30 = getDayTotals(30); const a = d30.reduce((s,d)=>s+d.alcohol,0); return Math.round(a/30*10)/10; })();
     document.getElementById('alcoholSummary').innerHTML = `
-      <strong>${daysWithAlc}</strong> of ${days.length} days had alcohol · 
-      <strong>${avgAlc}g</strong> avg/day · 
-      <strong>${alcCals}</strong> cal from alcohol (${trendRange}d)`;
+      <div class="goal-stat-grid" style="margin-bottom:12px;">
+        <div class="goal-stat"><div class="goal-stat-num">${avg7}g</div><div class="goal-stat-label">7-day avg/day</div></div>
+        <div class="goal-stat"><div class="goal-stat-num">${avg14}g</div><div class="goal-stat-label">14-day avg/day</div></div>
+        <div class="goal-stat"><div class="goal-stat-num">${avg30}g</div><div class="goal-stat-label">30-day avg/day</div></div>
+        <div class="goal-stat"><div class="goal-stat-num">${daysWithAlc}/${days.length}</div><div class="goal-stat-label">days with alcohol</div></div>
+      </div>
+      <p style="margin:0;font-size:12px;color:var(--text-3);">${alcCals} total calories from alcohol over ${trendRange} days</p>`;
   }
   // Goals
   if (sub === 'goals') {
@@ -1885,7 +1894,7 @@ function renderFavorites() {
   if (favorites.length===0){card.style.display='none';return;}
   card.style.display='';
   const shown = favorites.slice(0, 10);
-  list.innerHTML=shown.map(f=>`<div class="fav-item"><div class="fav-item-left"><div class="fav-item-name">${esc(f.meal_name)}</div><div class="fav-item-macros">${f.calories} cal · ${f.protein}g P · ${f.carbs}g C · ${f.fat}g F · ${f.fiber||0}g f · ${f.alcohol||0}g a</div></div><div class="fav-item-actions"><button class="fav-relog" onclick="quickLog(${f.id})">Log</button><button class="fav-remove" onclick="removeFavorite(${f.id})" aria-label="Remove">✕</button></div></div>`).join('');
+  list.innerHTML=shown.map(f=>`<div class="fav-item"><div class="fav-item-left"><div class="fav-item-name">${esc(f.meal_name)}</div><div class="fav-item-macros">${f.calories} cal · ${f.protein}g P · ${f.carbs}g C · ${f.fat}g F · ${f.fiber||0}g f${f.alcohol ? ' · '+f.alcohol+'g a' : ''}</div></div><div class="fav-item-actions"><button class="fav-relog" onclick="quickLog(${f.id})">Log</button><button class="fav-remove" onclick="removeFavorite(${f.id})" aria-label="Remove">✕</button></div></div>`).join('');
 }
 
 async function logWeight() {
@@ -2471,6 +2480,7 @@ async function estimateRecipe() {
     document.getElementById('rpCarbs').textContent = pendingRecipe.carbs;
     document.getElementById('rpFat').textContent = pendingRecipe.fat;
     document.getElementById('rpFiber').textContent = pendingRecipe.fiber;
+    document.getElementById('rpAlcohol').textContent = pendingRecipe.alcohol||0;
     document.getElementById('recipePreview').classList.add('show');
   } catch(e) {
     document.getElementById('recipeError').textContent = 'Error: ' + e.message;
@@ -2595,7 +2605,7 @@ async function addMealGroupAsRecipe(type, date) {
   }),{cal:0,prot:0,carbs:0,fat:0,fiber:0,alcohol:0});
   const name = type + ' — ' + groupMeals.map(m => m.meal_name).join(', ');
   const desc = groupMeals.map(m => m.description || m.meal_name).join('; ');
-  const recipe = { recipe_name: name, description: desc, portions: 1, calories: combined.cal, protein: combined.prot, carbs: combined.carbs, fat: combined.fat, fiber: combined.fiber };
+  const recipe = { recipe_name: name, description: desc, portions: 1, calories: combined.cal, protein: combined.prot, carbs: combined.carbs, fat: combined.fat, fiber: combined.fiber, alcohol: combined.alcohol||0 };
   if (supaReady) {
     setSyncStatus('busy','saving…');
     try {
@@ -2669,7 +2679,6 @@ function renderCalendar() {
   const firstDay = new Date(calendarYear, calendarMonth, 1).getDay();
   const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
   const monthName = new Date(calendarYear, calendarMonth).toLocaleDateString(undefined, {month:'long', year:'numeric'});
-  // Build tracked days set with calorie totals
   const trackedDays = {};
   meals.forEach(m => {
     if (!trackedDays[m.date]) trackedDays[m.date] = 0;
@@ -2691,7 +2700,49 @@ function renderCalendar() {
     html += `<div class="${cls}" onclick="selectCalDay('${ds}')">${d}</div>`;
   }
   html += '</div>';
+  // Vacation controls
+  html += `<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">
+    <div style="display:flex;gap:6px;align-items:flex-end;">
+      <div class="goal-cell" style="flex:1;"><span class="goal-label" style="font-size:10px;">Vacation start</span><input class="goal-input" type="date" id="calVacStart" style="font-size:12px;" /></div>
+      <div class="goal-cell" style="flex:1;"><span class="goal-label" style="font-size:10px;">End</span><input class="goal-input" type="date" id="calVacEnd" style="font-size:12px;" /></div>
+      <button class="save-btn" onclick="addVacationFromCal()" style="padding:6px 10px;font-size:12px;">🏖️</button>
+    </div>
+    <div id="calVacList" style="margin-top:6px;"></div>
+  </div>`;
   el.innerHTML = html;
+  // Render vacation list inside calendar
+  renderCalVacList();
+}
+
+function addVacationFromCal() {
+  const start = document.getElementById('calVacStart').value;
+  const end = document.getElementById('calVacEnd').value;
+  if (!start || !end || end < start) return;
+  document.getElementById('calVacStart').value = '';
+  document.getElementById('calVacEnd').value = '';
+  const entry = { start_date: start, end_date: end };
+  if (supaReady) {
+    supa('vacation_ranges','POST',{body:entry}).then(rows => { entry.id = rows[0].id; }).catch(() => { entry.id = Date.now(); });
+  } else { entry.id = Date.now(); }
+  vacationRanges.push(entry);
+  renderCalendar();
+  renderVacationList();
+  renderToday();
+  showQuickToast('Vacation added');
+}
+
+function renderCalVacList() {
+  const el = document.getElementById('calVacList');
+  if (!el) return;
+  const monthStart = `${calendarYear}-${String(calendarMonth+1).padStart(2,'0')}-01`;
+  const monthEnd = `${calendarYear}-${String(calendarMonth+1).padStart(2,'0')}-${new Date(calendarYear, calendarMonth+1, 0).getDate()}`;
+  const relevant = vacationRanges.filter(v => v.end_date >= monthStart && v.start_date <= monthEnd);
+  if (relevant.length === 0) return;
+  el.innerHTML = relevant.map(v => {
+    const s = new Date(v.start_date+'T12:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'});
+    const e = new Date(v.end_date+'T12:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'});
+    return `<div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--text-3);padding:2px 0;"><span>🏖️ ${s} – ${e}</span><button class="del-btn" onclick="removeVacation(${v.id});renderCalendar();" style="font-size:10px;">✕</button></div>`;
+  }).join('');
 }
 
 function selectCalDay(ds) {
@@ -2729,7 +2780,7 @@ function searchMeals() {
     html += `<div class="search-item">
       <div class="search-item-left">
         <div class="search-item-name">${esc(m.meal_name)}</div>
-        <div class="search-item-meta">${m.date} · ${m.protein}g P · ${m.carbs}g C · ${m.fat}g F · ${m.alcohol||0}g A${count > 1 ? ' · logged '+count+'×' : ''}</div>
+        <div class="search-item-meta">${m.date} · ${m.protein}g P · ${m.carbs}g C · ${m.fat}g F${m.alcohol ? ' · '+m.alcohol+'g A' : ''}${count > 1 ? ' · logged '+count+'×' : ''}</div>
       </div>
       <span class="search-item-cal">${m.calories}</span>
       <button class="log-today-btn" onclick="logSearchResult(${m.id})" style="margin-left:8px;">+Today</button>
