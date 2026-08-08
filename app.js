@@ -261,6 +261,7 @@ async function connectSupabase() {
       if (s.goal_date) { goalDate = s.goal_date; }
       if (s.goal_mode) { goalMode_ = s.goal_mode; }
       if (s.goal_rate) { goalRate = parseFloat(s.goal_rate); }
+      if (s.goal_start_date) { goalStartDate = s.goal_start_date; }
       document.getElementById('goalCal').value = goals.cal;
       document.getElementById('goalProt').value = goals.prot;
       document.getElementById('goalCarbs').value = goals.carbs;
@@ -2031,7 +2032,7 @@ async function saveGoalFromGoalsTab() {
   goalWeight = parseFloat(document.getElementById('goalWeightGoals').value) || null;
   goalStartDate = document.getElementById('goalStartDate').value || null;
   if (supaReady && currentUser) {
-    try { await supa('settings','PATCH',{query:'user_id=eq.'+currentUser.id,body:{goal_weight:goalWeight,goal_date:goalDate,goal_mode:goalMode_,goal_rate:goalRate}}); } catch(e){}
+    try { await supa('settings','PATCH',{query:'user_id=eq.'+currentUser.id,body:{goal_weight:goalWeight,goal_date:goalDate,goal_mode:goalMode_,goal_rate:goalRate,goal_start_date:goalStartDate}}); } catch(e){}
   }
   renderGoalsTab();
   renderGoalWeight();
