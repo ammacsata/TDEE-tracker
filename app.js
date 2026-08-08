@@ -1181,7 +1181,6 @@ function renderToday() {
   document.getElementById('totFat').textContent = t.fat;
   document.getElementById('totFiber').textContent = t.fiber;
   document.getElementById('totAlcohol').textContent = t.alcohol;
-  document.getElementById('totAlcoholCell').style.display = t.alcohol > 0 ? '' : 'none';
   const wEntry = weightLog.find(w => w.date === ds);
   const wRow = document.getElementById('todayWeightRow');
   if (wEntry) { document.getElementById('todayWeight').textContent = wEntry.value; wRow.style.display = ''; }
@@ -1625,36 +1624,19 @@ function renderTrends() {
   }
   // Alcohol
   if (sub === 'alcohol') {
-    const alcData = days.map(d => d.alcohol);
-    const alcAvg = rollingAvg(alcData, 7);
-    const alcLid = 'alcoholChartLegend';
-    const allAlcDS = [
-      {data:alcData,color:'#E879F9',label:'Alcohol (g)'},
-      {data:alcAvg,color:'rgba(232,121,249,0.4)',thin:true,label:'7d avg'}
-    ];
-    renderLegend(alcLid, [
-      {label:'Alcohol (g)',color:'#E879F9'},
-      {label:'7d avg',color:'rgba(232,121,249,0.5)',dashed:true}
-    ], () => renderTrends());
-    drawChart('alcoholChart',allAlcDS.filter(ds => isToggled(alcLid, ds.label)),labels,goals.alcohol>0?goals.alcohol:null);
-    if (chartMeta['alcoholChart']) chartMeta['alcoholChart'].dates = days.map(d => d.date);
-    // Summary
-    const alcDays = days.filter(d => d.alcohol > 0);
-    const totalAlc = alcDays.reduce((a,d) => a + d.alcohol, 0);
-    const daysWithAlc = alcDays.length;
-    const alcCals = Math.round(totalAlc * 7);
-    // Period averages
-    const avg7 = (() => { const d7 = getDayTotals(7); const a = d7.reduce((s,d)=>s+d.alcohol,0); return Math.round(a/7*10)/10; })();
-    const avg14 = (() => { const d14 = getDayTotals(14); const a = d14.reduce((s,d)=>s+d.alcohol,0); return Math.round(a/14*10)/10; })();
-    const avg30 = (() => { const d30 = getDayTotals(30); const a = d30.reduce((s,d)=>s+d.alcohol,0); return Math.round(a/30*10)/10; })();
+    renderAlcoholCalendar();
+    // Summary with averages
+    const avg7 = (() => { const d7 = getDayTotals(7); const a = d7.reduce((s,d)=>s+d.alcohol,0); return Math.round(a/7/14*4)/4; })();
+    const avg14 = (() => { const d14 = getDayTotals(14); const a = d14.reduce((s,d)=>s+d.alcohol,0); return Math.round(a/14/14*4)/4; })();
+    const avg30 = (() => { const d30 = getDayTotals(30); const a = d30.reduce((s,d)=>s+d.alcohol,0); return Math.round(a/30/14*4)/4; })();
+    const alcDays30 = getDayTotals(30).filter(d => d.alcohol > 0).length;
     document.getElementById('alcoholSummary').innerHTML = `
-      <div class="goal-stat-grid" style="margin-bottom:12px;">
-        <div class="goal-stat"><div class="goal-stat-num">${avg7}g</div><div class="goal-stat-label">7-day avg/day</div></div>
-        <div class="goal-stat"><div class="goal-stat-num">${avg14}g</div><div class="goal-stat-label">14-day avg/day</div></div>
-        <div class="goal-stat"><div class="goal-stat-num">${avg30}g</div><div class="goal-stat-label">30-day avg/day</div></div>
-        <div class="goal-stat"><div class="goal-stat-num">${daysWithAlc}/${days.length}</div><div class="goal-stat-label">days with alcohol</div></div>
-      </div>
-      <p style="margin:0;font-size:12px;color:var(--text-3);">${alcCals} total calories from alcohol over ${trendRange} days</p>`;
+      <div class="goal-stat-grid">
+        <div class="goal-stat"><div class="goal-stat-num">${avg7}</div><div class="goal-stat-label">drinks/day (7d)</div></div>
+        <div class="goal-stat"><div class="goal-stat-num">${avg14}</div><div class="goal-stat-label">drinks/day (14d)</div></div>
+        <div class="goal-stat"><div class="goal-stat-num">${avg30}</div><div class="goal-stat-label">drinks/day (30d)</div></div>
+        <div class="goal-stat"><div class="goal-stat-num">${alcDays30}/30</div><div class="goal-stat-label">days with alcohol</div></div>
+      </div>`;
   }
   // Goals
   if (sub === 'goals') {
@@ -2751,6 +2733,49 @@ function selectCalDay(ds) {
   renderToday();
 }
 
+// === ALCOHOL CALENDAR ===
+let alcCalMonth = new Date().getMonth();
+let alcCalYear = new Date().getFullYear();
+
+function changeAlcMonth(delta) {
+  alcCalMonth += delta;
+  if (alcCalMonth > 11) { alcCalMonth = 0; alcCalYear++; }
+  if (alcCalMonth < 0) { alcCalMonth = 11; alcCalYear--; }
+  renderAlcoholCalendar();
+}
+
+function renderAlcoholCalendar() {
+  const monthName = new Date(alcCalYear, alcCalMonth).toLocaleDateString(undefined, {month:'long', year:'numeric'});
+  document.getElementById('alcMonthLabel').textContent = monthName;
+  const firstDay = new Date(alcCalYear, alcCalMonth, 1).getDay();
+  const daysInMonth = new Date(alcCalYear, alcCalMonth + 1, 0).getDate();
+  // Build alcohol data by day
+  const alcByDay = {};
+  meals.forEach(m => {
+    if (m.alcohol > 0) {
+      if (!alcByDay[m.date]) alcByDay[m.date] = 0;
+      alcByDay[m.date] += m.alcohol;
+    }
+  });
+  let html = '<div class="alc-cal-grid">';
+  ['S','M','T','W','T','F','S'].forEach(d => html += `<div class="cal-dow">${d}</div>`);
+  for (let i = 0; i < firstDay; i++) html += '<div class="alc-cal-day empty"></div>';
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = `${alcCalYear}-${String(alcCalMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const grams = alcByDay[ds] || 0;
+    const drinks = Math.round(grams / 14 * 4) / 4;
+    let cls = 'alc-cal-day';
+    if (drinks === 0) cls += ' alc-none';
+    else if (drinks < 1) cls += ' alc-light';
+    else if (drinks <= 2) cls += ' alc-moderate';
+    else cls += ' alc-heavy';
+    const label = drinks > 0 ? drinks : '';
+    html += `<div class="${cls}"><span class="alc-day-num">${d}</span>${label ? `<span class="alc-day-drinks">${label}</span>` : ''}</div>`;
+  }
+  html += '</div>';
+  document.getElementById('alcoholCalGrid').innerHTML = html;
+}
+
 // === SEARCH ===
 function clearSearch() {
   document.getElementById('mealSearchInput').value = '';
@@ -2913,7 +2938,7 @@ function hideChartTooltip() {
 
 // Chart click navigation and tooltips - registered in init()
 function registerChartListeners() {
-  ['calChart','macroChart','macroPctChart','weightChart','tdeeChart','alcoholChart'].forEach(id => {
+  ['calChart','macroChart','macroPctChart','weightChart','tdeeChart'].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
     el.addEventListener('mousemove', e => showChartTooltip(id, e));
