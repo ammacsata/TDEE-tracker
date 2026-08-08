@@ -1637,6 +1637,7 @@ body {
 .cal-day.empty:hover { background: none; }
 .cal-day.tracked { background: var(--accent-light); color: var(--accent); font-weight: 600; }
 .cal-day.over { background: #FDEBD0; color: var(--amber); font-weight: 600; }
+.cal-day.vacation { background: #E0E7FF; color: #6366F1; font-weight: 500; font-style: italic; }
 .cal-day.today { border: 2px solid var(--accent); }
 .cal-day.selected { background: var(--accent); color: white; font-weight: 600; }
 

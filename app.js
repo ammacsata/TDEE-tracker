@@ -1,11 +1,11 @@
-// nutritracker v1.29 — app.js
+// nutritracker v1.30 — app.js
 const LS_CREDS = 'nutritracker_creds';
 const LS_SESSION = 'nutritracker_session';
 const SUPA_URL = 'https://whdamcifxsjfmnzgdrxe.supabase.co';
 const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndoZGFtY2lmeHNqZm1uemdkcnhlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg0NTIyMjUsImV4cCI6MjA5NDAyODIyNX0.w6NlBPQ8Fru36r0VOf0jmcty2Ex4YCt7yEHKYC9VBNA';
 
 let meals = [], pendingMeals = null, pendingDescription = null;
-let goals = { cal: 2000, prot: 150, carbs: 200, fat: 65, fiber: 25 };
+let goals = { cal: 2000, prot: 150, carbs: 200, fat: 65, fiber: 25, alcohol: 0 };
 let memoryNotes = '', noteInputVisible = false, viewDate = new Date();
 let favorites = [], weightLog = [], exerciseLog = [], recipes = [], calibrationNotes = [];
 let supaReady = false, undoStack = null, undoTimer = null;
@@ -13,6 +13,8 @@ let editingMealId = null, editForDate = null, editReplacingId = null;
 let currentUser = null, authToken = null;
 let compareMode = 'week', trendRange = 7;
 let goalWeight = null, goalDate = null, goalMode_ = 'date', goalRate = 1.0, goalStartDate = null;
+let estimationBias = 'balanced';
+let vacationRanges = [];
 
 // ─── SUPABASE HELPERS ───
 function supaUrl() { return SUPA_URL; }
@@ -262,23 +264,30 @@ async function connectSupabase() {
       if (s.goal_mode) { goalMode_ = s.goal_mode; }
       if (s.goal_rate) { goalRate = parseFloat(s.goal_rate); }
       if (s.goal_start_date) { goalStartDate = s.goal_start_date; }
+      if (s.estimation_bias) { estimationBias = s.estimation_bias; updateBiasUI(); }
       document.getElementById('goalCal').value = goals.cal;
       document.getElementById('goalProt').value = goals.prot;
       document.getElementById('goalCarbs').value = goals.carbs;
       document.getElementById('goalFat').value = goals.fat;
       document.getElementById('goalFiber').value = goals.fiber;
+      document.getElementById('goalAlcohol').value = goals.alcohol;
       updateGoalDisplay();
     }
     const mealRows = await supa('meals', 'GET', { query: 'select=*&order=date.desc,time.desc' });
-    meals = mealRows.map(r => ({ id:r.id, date:r.date, time:r.time, type:r.meal_type, meal_name:r.meal_name, description:r.description, calories:r.calories, protein:r.protein, carbs:r.carbs, fat:r.fat, fiber:r.fiber||0 }));
+    meals = mealRows.map(r => ({ id:r.id, date:r.date, time:r.time, type:r.meal_type, meal_name:r.meal_name, description:r.description, calories:r.calories, protein:r.protein, carbs:r.carbs, fat:r.fat, fiber:r.fiber||0, alcohol:r.alcohol||0 }));
     const favRows = await supa('favorites', 'GET', { query: 'select=*&order=created_at.desc' });
-    favorites = favRows.map(r => ({ id:r.id, meal_name:r.meal_name, calories:r.calories, protein:r.protein, carbs:r.carbs, fat:r.fat, fiber:r.fiber||0, type:r.meal_type, description:r.description }));
+    favorites = favRows.map(r => ({ id:r.id, meal_name:r.meal_name, calories:r.calories, protein:r.protein, carbs:r.carbs, fat:r.fat, fiber:r.fiber||0, alcohol:r.alcohol||0, type:r.meal_type, description:r.description }));
     const weightRows = await supa('weight_log', 'GET', { query: 'select=*&order=date.asc' });
     weightLog = weightRows.map(r => ({ id:r.id, date:r.date, value:r.value }));
     const exRows = await supa('exercise', 'GET', { query: 'select=*&order=date.desc' });
     exerciseLog = exRows.map(r => ({ id:r.id, date:r.date, description:r.description, calories_burned:r.calories_burned }));
+    try {
+      const vacRows = await supa('vacation_ranges', 'GET', { query: 'select=*&order=start_date.asc' });
+      vacationRanges = vacRows.map(r => ({ id:r.id, start_date:r.start_date, end_date:r.end_date }));
+    } catch(e) { vacationRanges = []; }
+    renderVacationList();
     const recRows = await supa('recipes', 'GET', { query: 'select=*&order=created_at.desc' });
-    recipes = recRows.map(r => ({ id:r.id, recipe_name:r.recipe_name, description:r.description, calories:r.calories, protein:r.protein, carbs:r.carbs, fat:r.fat, fiber:r.fiber||0, portions:r.portions||1 }));
+    recipes = recRows.map(r => ({ id:r.id, recipe_name:r.recipe_name, description:r.description, calories:r.calories, protein:r.protein, carbs:r.carbs, fat:r.fat, fiber:r.fiber||0, alcohol:r.alcohol||0, portions:r.portions||1 }));
     const calNoteRows = await supa('calibrations', 'GET', { query: 'select=*&order=created_at.asc' });
     calibrationNotes = calNoteRows.map(r => ({ id:r.id, note:r.note }));
     rebuildMemoryNotes(); updateCalCount();
@@ -490,7 +499,7 @@ async function processPhotoScan() {
     const userText = context ? `Read this nutrition label. Additional context: ${context}` : 'Read this nutrition label and extract the per-serving macros.';
     const data = await callClaude(key, {
       model: 'claude-sonnet-4-6', max_tokens: 400,
-      system: `You read nutrition labels from photos. Extract the nutrition facts and respond ONLY with JSON:\n{"meal_name":"product name","servings_per_container":number,"serving_size":"description","calories":number,"protein":number,"carbs":number,"fat":number,"fiber":number}\nAll macro values should be PER SERVING. If you can read the product name, use it. If not, describe it. All numbers integers. No markdown. If the user provides additional context (e.g. "I ate half"), adjust the servings_per_container or note it but keep per-serving values unchanged.`,
+      system: `You read nutrition labels from photos. Extract the nutrition facts and respond ONLY with JSON:\n{"meal_name":"product name","servings_per_container":number,"serving_size":"description","calories":number,"protein":number,"carbs":number,"fat":number,"fiber":number,"alcohol":number}\nAll macro values should be PER SERVING. If you can read the product name, use it. If not, describe it. All numbers integers. No markdown. If the user provides additional context (e.g. "I ate half"), adjust the servings_per_container or note it but keep per-serving values unchanged.`,
       messages: [{
         role: 'user',
         content: [
@@ -514,6 +523,7 @@ async function processPhotoScan() {
       carbs: r.carbs || 0,
       fat: r.fat || 0,
       fiber: r.fiber || 0,
+      alcohol: r.alcohol || 0,
       servings_per_container: r.servings_per_container || 1,
       serving_size: r.serving_size || '1 serving'
     };
@@ -522,7 +532,7 @@ async function processPhotoScan() {
     const photoDate = editForDate || fmtDate(now);
     const photoTime = now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
     const photoType = getMealType();
-    pendingMeals = [{ meal_name: m.meal_name, calories: m.calories, protein: m.protein, carbs: m.carbs, fat: m.fat, fiber: m.fiber, date: photoDate, time: photoTime, type: photoType, description: context ? 'Scanned: ' + context : 'Scanned from nutrition label' }];
+    pendingMeals = [{ meal_name: m.meal_name, calories: m.calories, protein: m.protein, carbs: m.carbs, fat: m.fat, fiber: m.fiber, alcohol: m.alcohol||0, date: photoDate, time: photoTime, type: photoType, description: context ? 'Scanned: ' + context : 'Scanned from nutrition label' }];
     pendingDescription = m.meal_name;
     document.getElementById('previewName').textContent = m.meal_name;
     document.getElementById('multiPreview').style.display = 'none';
@@ -531,6 +541,7 @@ async function processPhotoScan() {
     document.getElementById('pCarbs').textContent = m.carbs;
     document.getElementById('pFat').textContent = m.fat;
     document.getElementById('pFiber').textContent = m.fiber;
+  document.getElementById('pAlcohol').textContent = m.alcohol||0;
     document.getElementById('previewNote').textContent = `Per serving: ${m.serving_size}`;
     const sel = document.getElementById('servingSelector');
     sel.style.display = '';
@@ -545,7 +556,7 @@ async function processPhotoScan() {
     document.getElementById('mealAnalysis').style.display = 'none';
     const today = fmtDate(new Date());
     const todayMeals = meals.filter(m => m.date === today);
-    const todayTotals = todayMeals.reduce((a,m) => ({cal:a.cal+m.calories,prot:a.prot+m.protein,carbs:a.carbs+m.carbs,fat:a.fat+m.fat,fiber:a.fiber+(m.fiber||0)}),{cal:0,prot:0,carbs:0,fat:0,fiber:0});
+    const todayTotals = todayMeals.reduce((a,m) => ({cal:a.cal+m.calories,prot:a.prot+m.protein,carbs:a.carbs+m.carbs,fat:a.fat+m.fat,fiber:a.fiber+(m.fiber||0),alcohol:a.alcohol+(m.alcohol||0)}),{cal:0,prot:0,carbs:0,fat:0,fiber:0,alcohol:0});
     getMealAnalysis(pendingMeals, todayTotals);
   } catch(e) {
     document.getElementById('errorMsg').textContent = 'Error: ' + e.message;
@@ -564,11 +575,13 @@ function updatePhotoServings() {
   const carbs = Math.round(m.carbs * count);
   const fat = Math.round(m.fat * count);
   const fiber = Math.round(m.fiber * count);
+  const alcohol = Math.round((m.alcohol||0) * count);
   document.getElementById('pCal').textContent = cal;
   document.getElementById('pProt').textContent = prot;
   document.getElementById('pCarbs').textContent = carbs;
   document.getElementById('pFat').textContent = fat;
   document.getElementById('pFiber').textContent = fiber;
+  document.getElementById('pAlcohol').textContent = alcohol;
   const name = count !== 1 ? `${m.meal_name} (×${count})` : m.meal_name;
   document.getElementById('previewName').textContent = name;
   const existing = pendingMeals[0];
@@ -603,6 +616,7 @@ async function runEstimation(key, desc) {
     return;
   }
   const memCtx = memoryNotes ? `\n\nPersonal calibration notes — apply these to FOOD estimates only:\n${memoryNotes}\n\nIMPORTANT: If any notes mention exercise, activity, or calories burned, do NOT subtract those from the food calorie estimate. Only adjust the food's own calories, protein, carbs, fat, and fiber based on food-related notes (portion sizes, cooking methods, ingredients). Exercise calories are tracked separately.` : '';
+  const biasCtx = getEstimationBiasPrompt();
   const recipeCtx = recipes.length > 0 ? `\n\nUser's saved recipes — if the meal matches one of these, use these exact values:\n${recipes.map(r => `- ${r.recipe_name}: ${r.calories} cal, ${r.protein}g P, ${r.carbs}g C, ${r.fat}g F, ${r.fiber}g f`).join('\n')}` : '';
   try {
     const detectData = await callClaude(key, { model: 'claude-sonnet-4-6', max_tokens: 50, system: 'The user will describe a meal. Respond with ONLY "yes" or "no" — does this mention a specific restaurant, fast food chain, brand name, or packaged food product? No explanation.', messages: [{ role: 'user', content: desc }] });
@@ -611,7 +625,7 @@ async function runEstimation(key, desc) {
     const today = fmtDate(new Date());
     const defaultDate = editForDate || today;
     const estimateBody = { model: 'claude-sonnet-4-6', max_tokens: 1024,
-      system: `You are a nutrition estimation assistant.${needsSearch ? ' The user mentioned a specific restaurant or brand — use the web search tool to look up their official nutrition data before responding.' : ''} Today's date is ${today}. The user may describe one or multiple food items. Return a JSON array of items — even for a single item, wrap it in an array. Respond ONLY with a JSON array — no markdown, no preamble.\n[{"meal_name":"short name","calories":number,"protein":number,"carbs":number,"fat":number,"fiber":number,"date":"YYYY-MM-DD","meal_type":"Breakfast|Lunch|Dinner|Snack","note":"one sentence on source and confidence"}]\nAll numbers integers. For "date": if the user mentions a day (yesterday, last Tuesday, Monday, etc.), calculate the correct YYYY-MM-DD date relative to today (${today}). If no day is mentioned, use "${defaultDate}". For "meal_type": if the user mentions when they ate it, use that. Otherwise use "unspecified". Each distinct food item should be its own entry in the array.${recipeCtx}${memCtx}`,
+      system: `You are a nutrition estimation assistant.${needsSearch ? ' The user mentioned a specific restaurant or brand — use the web search tool to look up their official nutrition data before responding.' : ''} Today's date is ${today}. The user may describe one or multiple food items. Return a JSON array of items — even for a single item, wrap it in an array. Respond ONLY with a JSON array — no markdown, no preamble.\n[{"meal_name":"short name","calories":number,"protein":number,"carbs":number,"fat":number,"fiber":number,"alcohol":number,"date":"YYYY-MM-DD","meal_type":"Breakfast|Lunch|Dinner|Snack","note":"one sentence on source and confidence"}]\nAll numbers integers. For "date": if the user mentions a day (yesterday, last Tuesday, Monday, etc.), calculate the correct YYYY-MM-DD date relative to today (${today}). If no day is mentioned, use "${defaultDate}". For "meal_type": if the user mentions when they ate it, use that. Otherwise use "unspecified". Each distinct food item should be its own entry in the array.${recipeCtx}${memCtx}${biasCtx}`,
       messages: [{ role: 'user', content: `Estimate nutrition for: ${desc}` }] };
     if (needsSearch) estimateBody.tools = [{ type: 'web_search_20250305', name: 'web_search' }];
     const data = await callClaude(key, estimateBody);
@@ -624,7 +638,7 @@ async function runEstimation(key, desc) {
     pendingMeals = items.map(meal => {
       const mealDate = meal.date && /^\d{4}-\d{2}-\d{2}$/.test(meal.date) ? meal.date : today;
       const mt = meal.meal_type && meal.meal_type !== 'unspecified' ? meal.meal_type : null;
-      return { ...meal, fiber: meal.fiber||0, type: mt || getMealType(), description: desc, time: new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}), date: mealDate, id: Date.now() + Math.random() };
+      return { ...meal, fiber: meal.fiber||0, alcohol: meal.alcohol||0, type: mt || getMealType(), description: desc, time: new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}), date: mealDate, id: Date.now() + Math.random() };
     });
     pendingDescription = desc;
     // Cache the result (skip if web search was used — those need fresh data)
@@ -641,7 +655,7 @@ async function runEstimation(key, desc) {
 }
 
 function showPreview(items) {
-  const totals = items.reduce((a,m) => ({cal:a.cal+m.calories,prot:a.prot+m.protein,carbs:a.carbs+m.carbs,fat:a.fat+m.fat,fiber:a.fiber+(m.fiber||0)}),{cal:0,prot:0,carbs:0,fat:0,fiber:0});
+  const totals = items.reduce((a,m) => ({cal:a.cal+m.calories,prot:a.prot+m.protein,carbs:a.carbs+m.carbs,fat:a.fat+m.fat,fiber:a.fiber+(m.fiber||0),alcohol:a.alcohol+(m.alcohol||0)}),{cal:0,prot:0,carbs:0,fat:0,fiber:0,alcohol:0});
   if (items.length === 1) {
     document.getElementById('previewName').textContent = items[0].meal_name;
     document.getElementById('multiPreview').innerHTML = '';
@@ -657,6 +671,7 @@ function showPreview(items) {
   document.getElementById('pCarbs').textContent = totals.carbs;
   document.getElementById('pFat').textContent = totals.fat;
   document.getElementById('pFiber').textContent = totals.fiber;
+    document.getElementById('pAlcohol').textContent = totals.alcohol;
   const dateNote = items[0].date !== fmtDate(new Date()) ? ' · logging to ' + items[0].date : '';
   document.getElementById('previewNote').textContent = (items[0].note || '') + dateNote;
   document.getElementById('inlineNote').value = '';
@@ -670,7 +685,7 @@ function showPreview(items) {
   document.getElementById('mealAnalysis').style.display = 'none';
   const today = fmtDate(new Date());
   const todayMeals = meals.filter(m => m.date === today);
-  const todayTotals = todayMeals.reduce((a,m) => ({cal:a.cal+m.calories,prot:a.prot+m.protein,carbs:a.carbs+m.carbs,fat:a.fat+m.fat,fiber:a.fiber+(m.fiber||0)}),{cal:0,prot:0,carbs:0,fat:0,fiber:0});
+  const todayTotals = todayMeals.reduce((a,m) => ({cal:a.cal+m.calories,prot:a.prot+m.protein,carbs:a.carbs+m.carbs,fat:a.fat+m.fat,fiber:a.fiber+(m.fiber||0),alcohol:a.alcohol+(m.alcohol||0)}),{cal:0,prot:0,carbs:0,fat:0,fiber:0,alcohol:0});
   getMealAnalysis(pendingMeals, todayTotals);
 }
 
@@ -698,7 +713,7 @@ async function confirmLog() {
     if (supaReady) {
       setSyncStatus('busy', 'saving…');
       try {
-        const rows = await supa('meals', 'POST', { body: { date: m.date, time: m.time, meal_type: m.type, meal_name: m.meal_name, description: m.description, calories: m.calories, protein: m.protein, carbs: m.carbs, fat: m.fat, fiber: m.fiber||0 } });
+        const rows = await supa('meals', 'POST', { body: { date: m.date, time: m.time, meal_type: m.type, meal_name: m.meal_name, description: m.description, calories: m.calories, protein: m.protein, carbs: m.carbs, fat: m.fat, fiber: m.fiber||0, alcohol: m.alcohol||0 } });
         const logged = { ...m, id: rows[0].id };
         meals.unshift(logged);
         loggedMeals.push(logged);
@@ -798,6 +813,7 @@ function openEditModal(id) {
   document.getElementById('editCarbs').value = meal.carbs;
   document.getElementById('editFat').value = meal.fat;
   document.getElementById('editFiber').value = meal.fiber || 0;
+  document.getElementById('editAlcohol').value = meal.alcohol || 0;
   document.getElementById('editType').value = meal.type;
   document.getElementById('editDate').value = meal.date;
   document.getElementById('editOverlay').style.display = '';
@@ -825,13 +841,14 @@ async function saveEditModal() {
   meal.carbs = parseInt(document.getElementById('editCarbs').value) || 0;
   meal.fat = parseInt(document.getElementById('editFat').value) || 0;
   meal.fiber = parseInt(document.getElementById('editFiber').value) || 0;
+  meal.alcohol = parseInt(document.getElementById('editAlcohol').value) || 0;
   meal.type = document.getElementById('editType').value;
   meal.date = document.getElementById('editDate').value;
   if (supaReady) {
     try {
       await supa('meals','PATCH',{query:`id=eq.${editingMealId}`,body:{
         meal_name:meal.meal_name,calories:meal.calories,protein:meal.protein,
-        carbs:meal.carbs,fat:meal.fat,fiber:meal.fiber,meal_type:meal.type,date:meal.date
+        carbs:meal.carbs,fat:meal.fat,fiber:meal.fiber,alcohol:meal.alcohol,meal_type:meal.type,date:meal.date
       }});
       setSyncStatus('ok','synced');
     } catch(e) { setSyncStatus('err','sync error'); }
@@ -845,11 +862,11 @@ async function logMealToToday(id) {
   const meal = meals.find(m => m.id === id);
   if (!meal) return;
   const now = new Date();
-  const mealData = { date:fmtDate(now), time:now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}), type:meal.type, meal_name:meal.meal_name, description:meal.description, calories:meal.calories, protein:meal.protein, carbs:meal.carbs, fat:meal.fat, fiber:meal.fiber||0 };
+  const mealData = { date:fmtDate(now), time:now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}), type:meal.type, meal_name:meal.meal_name, description:meal.description, calories:meal.calories, protein:meal.protein, carbs:meal.carbs, fat:meal.fat, fiber:meal.fiber||0, alcohol:meal.alcohol||0 };
   if (supaReady) {
     setSyncStatus('busy','saving…');
     try {
-      const rows = await supa('meals','POST',{body:{date:mealData.date,time:mealData.time,meal_type:mealData.type,meal_name:mealData.meal_name,description:mealData.description,calories:mealData.calories,protein:mealData.protein,carbs:mealData.carbs,fat:mealData.fat,fiber:mealData.fiber}});
+      const rows = await supa('meals','POST',{body:{date:mealData.date,time:mealData.time,meal_type:mealData.type,meal_name:mealData.meal_name,description:mealData.description,calories:mealData.calories,protein:mealData.protein,carbs:mealData.carbs,fat:mealData.fat,fiber:mealData.fiber,alcohol:mealData.alcohol||0}});
       mealData.id = rows[0].id;
       setSyncStatus('ok','synced');
     } catch(e) { mealData.id = Date.now(); setSyncStatus('err','sync error'); }
@@ -866,11 +883,11 @@ async function logMealGroupToToday(type, date) {
   const time = now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
   let count = 0;
   for (const meal of groupMeals) {
-    const mealData = { date:today, time, type:meal.type, meal_name:meal.meal_name, description:meal.description, calories:meal.calories, protein:meal.protein, carbs:meal.carbs, fat:meal.fat, fiber:meal.fiber||0 };
+    const mealData = { date:today, time, type:meal.type, meal_name:meal.meal_name, description:meal.description, calories:meal.calories, protein:meal.protein, carbs:meal.carbs, fat:meal.fat, fiber:meal.fiber||0, alcohol:meal.alcohol||0 };
     if (supaReady) {
       setSyncStatus('busy','saving…');
       try {
-        const rows = await supa('meals','POST',{body:{date:mealData.date,time:mealData.time,meal_type:mealData.type,meal_name:mealData.meal_name,description:mealData.description,calories:mealData.calories,protein:mealData.protein,carbs:mealData.carbs,fat:mealData.fat,fiber:mealData.fiber}});
+        const rows = await supa('meals','POST',{body:{date:mealData.date,time:mealData.time,meal_type:mealData.type,meal_name:mealData.meal_name,description:mealData.description,calories:mealData.calories,protein:mealData.protein,carbs:mealData.carbs,fat:mealData.fat,fiber:mealData.fiber,alcohol:mealData.alcohol||0}});
         mealData.id = rows[0].id;
       } catch(e) { mealData.id = Date.now(); }
     } else { mealData.id = Date.now(); }
@@ -899,7 +916,7 @@ async function performUndo() {
     const m = action.meal;
     if (action.supaDeleted && supaReady) {
       try {
-        const rows = await supa('meals', 'POST', { body: { date: m.date, time: m.time, meal_type: m.type, meal_name: m.meal_name, description: m.description, calories: m.calories, protein: m.protein, carbs: m.carbs, fat: m.fat, fiber: m.fiber||0 } });
+        const rows = await supa('meals', 'POST', { body: { date: m.date, time: m.time, meal_type: m.type, meal_name: m.meal_name, description: m.description, calories: m.calories, protein: m.protein, carbs: m.carbs, fat: m.fat, fiber: m.fiber||0, alcohol: m.alcohol||0 } });
         m.id = rows[0].id;
       } catch(e) {}
     }
@@ -1006,16 +1023,76 @@ async function saveGoals() {
     goals.carbs = Math.round((carbsPct / 100 * cal) / 4);
     goals.fat = Math.round((fatPct / 100 * cal) / 9);
     goals.fiber = parseInt(document.getElementById('goalFiber').value) || 25;
+    goals.alcohol = parseInt(document.getElementById('goalAlcohol').value) || 0;
   } else {
     goals.cal = parseInt(document.getElementById('goalCal').value) || 2000;
     goals.prot = parseInt(document.getElementById('goalProt').value) || 150;
     goals.carbs = parseInt(document.getElementById('goalCarbs').value) || 200;
     goals.fat = parseInt(document.getElementById('goalFat').value) || 65;
     goals.fiber = parseInt(document.getElementById('goalFiber').value) || 25;
+    goals.alcohol = parseInt(document.getElementById('goalAlcohol').value) || 0;
   }
   if (supaReady) { try { await supa('settings', 'PATCH', { query: 'user_id=eq.' + currentUser.id, body: { goal_cal: goals.cal, goal_prot: goals.prot, goal_carbs: goals.carbs, goal_fat: goals.fat, goal_fiber: goals.fiber } }); } catch(e) {} }
   updateGoalDisplay();
   renderToday();
+}
+
+async function setEstimationBias(mode) {
+  estimationBias = mode;
+  updateBiasUI();
+  if (supaReady && currentUser) {
+    try { await supa('settings','PATCH',{query:'user_id=eq.'+currentUser.id,body:{estimation_bias:mode}}); } catch(e){}
+  }
+}
+
+function updateBiasUI() {
+  document.getElementById('biasConservative').classList.toggle('active', estimationBias === 'conservative');
+  document.getElementById('biasBalanced').classList.toggle('active', estimationBias === 'balanced');
+  document.getElementById('biasAggressive').classList.toggle('active', estimationBias === 'aggressive');
+  const hints = {conservative:'Estimates higher calories — assumes larger portions, more oil/butter, richer prep.',balanced:'Uses average estimates for portion sizes and preparation.',aggressive:'Estimates lower calories — assumes smaller portions, leaner prep, less added fat.'};
+  document.getElementById('biasHint').textContent = hints[estimationBias] || hints.balanced;
+}
+
+function getEstimationBiasPrompt() {
+  if (estimationBias === 'conservative') return '\n\nIMPORTANT: The user prefers CONSERVATIVE estimates. When portion sizes or preparation methods are ambiguous, estimate toward the HIGHER end of the reasonable range — assume larger portions, more oil/butter, richer preparations. Aim roughly one standard deviation above the average estimate.';
+  if (estimationBias === 'aggressive') return '\n\nIMPORTANT: The user prefers AGGRESSIVE estimates. When portion sizes or preparation methods are ambiguous, estimate toward the LOWER end of the reasonable range — assume smaller portions, leaner preparations, less added fat. Aim roughly one standard deviation below the average estimate.';
+  return '';
+}
+
+function isVacationDay(dateStr) {
+  return vacationRanges.some(v => dateStr >= v.start_date && dateStr <= v.end_date);
+}
+
+async function addVacation() {
+  const start = document.getElementById('vacStart').value;
+  const end = document.getElementById('vacEnd').value;
+  if (!start || !end || end < start) return;
+  const entry = { start_date: start, end_date: end };
+  if (supaReady) {
+    try { const rows = await supa('vacation_ranges','POST',{body:entry}); entry.id = rows[0].id; } catch(e) { entry.id = Date.now(); }
+  } else { entry.id = Date.now(); }
+  vacationRanges.push(entry);
+  document.getElementById('vacStart').value = '';
+  document.getElementById('vacEnd').value = '';
+  renderVacationList();
+  showQuickToast('Vacation added');
+}
+
+async function removeVacation(id) {
+  if (supaReady) { try { await supa('vacation_ranges','DELETE',{query:'id=eq.'+id}); } catch(e){} }
+  vacationRanges = vacationRanges.filter(v => v.id !== id);
+  renderVacationList();
+}
+
+function renderVacationList() {
+  const el = document.getElementById('vacationList');
+  if (!el) return;
+  if (vacationRanges.length === 0) { el.innerHTML = '<p style="font-size:12px;color:var(--text-3);">No vacation ranges set.</p>'; return; }
+  el.innerHTML = vacationRanges.map(v => {
+    const s = new Date(v.start_date+'T12:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'});
+    const e = new Date(v.end_date+'T12:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'});
+    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;"><span>${s} – ${e}</span><button class="del-btn" onclick="removeVacation(${v.id})" aria-label="Remove">✕</button></div>`;
+  }).join('');
 }
 
 function updateGoalDisplay() {
@@ -1084,7 +1161,7 @@ async function resetAll() {
   updateCalCount();
   document.getElementById('goalCal').value = 2000; document.getElementById('goalProt').value = 150;
   document.getElementById('goalCarbs').value = 200; document.getElementById('goalFat').value = 65;
-  document.getElementById('goalFiber').value = 25;
+  document.getElementById('goalFiber').value = 25; document.getElementById('goalAlcohol').value = 0;
   renderToday(); renderFavorites();
 }
 
@@ -1095,13 +1172,14 @@ function renderToday() {
   const day = meals.filter(m => m.date === ds);
   const dayEx = exerciseLog.filter(e => e.date === ds);
   const exCal = dayEx.reduce((a,e) => a + e.calories_burned, 0);
-  const t = day.reduce((a,m) => ({cal:a.cal+m.calories,prot:a.prot+m.protein,carbs:a.carbs+m.carbs,fat:a.fat+m.fat,fiber:a.fiber+(m.fiber||0)}),{cal:0,prot:0,carbs:0,fat:0,fiber:0});
+  const t = day.reduce((a,m) => ({cal:a.cal+m.calories,prot:a.prot+m.protein,carbs:a.carbs+m.carbs,fat:a.fat+m.fat,fiber:a.fiber+(m.fiber||0),alcohol:a.alcohol+(m.alcohol||0)}),{cal:0,prot:0,carbs:0,fat:0,fiber:0,alcohol:0});
   const netCal = t.cal - exCal;
   document.getElementById('totCal').textContent = netCal;
   document.getElementById('totProt').textContent = t.prot;
   document.getElementById('totCarbs').textContent = t.carbs;
   document.getElementById('totFat').textContent = t.fat;
   document.getElementById('totFiber').textContent = t.fiber;
+  document.getElementById('totAlcohol').textContent = t.alcohol;
   const wEntry = weightLog.find(w => w.date === ds);
   const wRow = document.getElementById('todayWeightRow');
   if (wEntry) { document.getElementById('todayWeight').textContent = wEntry.value; wRow.style.display = ''; }
@@ -1130,7 +1208,8 @@ function renderToday() {
     {label:'Protein',val:t.prot,goal:goals.prot,color:'#3B82F6'},
     {label:'Carbs',val:t.carbs,goal:goals.carbs,color:'#F59E0B'},
     {label:'Fat',val:t.fat,goal:goals.fat,color:'#EF4444'},
-    {label:'Fiber',val:t.fiber,goal:goals.fiber,color:'#A855F7'}
+    {label:'Fiber',val:t.fiber,goal:goals.fiber,color:'#A855F7'},
+    {label:'Alcohol',val:t.alcohol,goal:goals.alcohol,color:'#E879F9'}
   ];
   document.getElementById('progressBars').innerHTML = bars.map(b => {
     const pct = b.goal > 0 ? Math.round((b.val/b.goal)*100) : 0;
@@ -1173,7 +1252,7 @@ function renderToday() {
   const isPast = ds !== fmtDate(new Date());
   orderedKeys.forEach(type => {
     const items = groups[type];
-    const sub = items.reduce((a,m) => ({cal:a.cal+m.calories,prot:a.prot+m.protein,carbs:a.carbs+m.carbs,fat:a.fat+m.fat,fiber:a.fiber+(m.fiber||0)}),{cal:0,prot:0,carbs:0,fat:0,fiber:0});
+    const sub = items.reduce((a,m) => ({cal:a.cal+m.calories,prot:a.prot+m.protein,carbs:a.carbs+m.carbs,fat:a.fat+m.fat,fiber:a.fiber+(m.fiber||0),alcohol:a.alcohol+(m.alcohol||0)}),{cal:0,prot:0,carbs:0,fat:0,fiber:0,alcohol:0});
     html += `<li class="meal-group-header"><div class="meal-group-top"><span class="meal-group-label">${esc(type)}</span><div class="meal-group-btns">${isPast ? `<button class="log-today-btn" onclick="logMealGroupToToday('${esc(type)}','${ds}')">+Today</button>` : ''}<button class="log-today-btn" onclick="addMealGroupAsRecipe('${esc(type)}','${ds}')" style="background:var(--blue-light,#E8F0FE);color:var(--blue,#2B6CB0);">+Recipe</button></div></div><div class="meal-group-subtotal">${sub.cal} cal · ${sub.prot}g P · ${sub.carbs}g C · ${sub.fat}g F · ${sub.fiber}g f</div></li>`;
     items.forEach(m => {
       html += `<li>
@@ -1253,7 +1332,7 @@ function getDayTotals(numDays) {
     const d = new Date(); d.setDate(d.getDate()-i);
     const ds = fmtDate(d);
     const dm = meals.filter(m => m.date === ds);
-    const t = dm.reduce((a,m) => ({cal:a.cal+m.calories,prot:a.prot+m.protein,carbs:a.carbs+m.carbs,fat:a.fat+m.fat,fiber:a.fiber+(m.fiber||0)}),{cal:0,prot:0,carbs:0,fat:0,fiber:0});
+    const t = dm.reduce((a,m) => ({cal:a.cal+m.calories,prot:a.prot+m.protein,carbs:a.carbs+m.carbs,fat:a.fat+m.fat,fiber:a.fiber+(m.fiber||0),alcohol:a.alcohol+(m.alcohol||0)}),{cal:0,prot:0,carbs:0,fat:0,fiber:0,alcohol:0});
     days.push({ date: ds, label: d.toLocaleDateString(undefined,{weekday:'short',day:'numeric'}), ...t });
   }
   return days;
@@ -1453,13 +1532,14 @@ function renderTrends() {
   const col = n => cs.getPropertyValue(n).trim();
   const sub = currentTrendSub;
   const dwd=days.filter(d=>d.cal>0), n=dwd.length||1;
-  const sum=dwd.reduce((a,d)=>({cal:a.cal+d.cal,prot:a.prot+d.prot,carbs:a.carbs+d.carbs,fat:a.fat+d.fat,fiber:a.fiber+d.fiber}),{cal:0,prot:0,carbs:0,fat:0,fiber:0});
+  const sum=dwd.reduce((a,d)=>({cal:a.cal+d.cal,prot:a.prot+d.prot,carbs:a.carbs+d.carbs,fat:a.fat+d.fat,fiber:a.fiber+d.fiber,alcohol:a.alcohol+d.alcohol}),{cal:0,prot:0,carbs:0,fat:0,fiber:0,alcohol:0});
   // Always update text-based elements
   document.getElementById('avgCal').textContent=Math.round(sum.cal/n);
   document.getElementById('avgProt').textContent=Math.round(sum.prot/n);
   document.getElementById('avgCarbs').textContent=Math.round(sum.carbs/n);
   document.getElementById('avgFat').textContent=Math.round(sum.fat/n);
   document.getElementById('avgFiber').textContent=Math.round(sum.fiber/n);
+  document.getElementById('avgAlcohol').textContent=Math.round(sum.alcohol/n);
   document.getElementById('avgLabel').textContent='Daily averages ('+trendRange+'d)';
   // Overview
   if (sub === 'overview') {
@@ -1506,14 +1586,14 @@ function renderTrends() {
   if (sub === 'macros') {
     renderDonut(sum, n);
     const macroLid = 'macroChartLegend';
-    const macroColors = {Protein:col('--accent')||'#2E6B3E',Carbs:col('--amber')||'#B7791F',Fat:col('--coral')||'#C53D2F',Fiber:col('--purple')||'#A855F7'};
+    const macroColors = {Protein:col('--accent')||'#2E6B3E',Carbs:col('--amber')||'#B7791F',Fat:col('--coral')||'#C53D2F',Fiber:col('--purple')||'#A855F7',Alcohol:'#E879F9'};
     const macroAllDS = [
       {data:days.map(d=>d.prot),color:macroColors.Protein,label:'Protein'},
       {data:days.map(d=>d.carbs),color:macroColors.Carbs,label:'Carbs'},
       {data:days.map(d=>d.fat),color:macroColors.Fat,label:'Fat'},
       {data:days.map(d=>d.fiber),color:macroColors.Fiber,label:'Fiber'}
     ];
-    renderLegend(macroLid, Object.entries(macroColors).map(([k,v])=>({label:k,color:v})), () => renderTrends());
+    renderLegend(macroLid, Object.entries(macroColors).map(([k,v])=>({label:k,color:v})).concat([{label:'Alcohol',color:'#E879F9'}]), () => renderTrends());
     drawChart('macroChart',macroAllDS.filter(ds => isToggled(macroLid, ds.label)),labels,null);
 
     const pctLid = 'macroPctChartLegend';
@@ -1521,7 +1601,8 @@ function renderTrends() {
       prot: goals.prot > 0 ? Math.round((d.prot/goals.prot)*100) : 0,
       carbs: goals.carbs > 0 ? Math.round((d.carbs/goals.carbs)*100) : 0,
       fat: goals.fat > 0 ? Math.round((d.fat/goals.fat)*100) : 0,
-      fiber: goals.fiber > 0 ? Math.round((d.fiber/goals.fiber)*100) : 0
+      fiber: goals.fiber > 0 ? Math.round((d.fiber/goals.fiber)*100) : 0,
+      alcohol: goals.alcohol > 0 ? Math.round((d.alcohol/goals.alcohol)*100) : 0
     }));
     const pctAllDS = [
       {data:pctData.map(d=>d.prot),color:macroColors.Protein,label:'Protein'},
@@ -1529,7 +1610,7 @@ function renderTrends() {
       {data:pctData.map(d=>d.fat),color:macroColors.Fat,label:'Fat'},
       {data:pctData.map(d=>d.fiber),color:macroColors.Fiber,label:'Fiber'}
     ];
-    renderLegend(pctLid, Object.entries(macroColors).map(([k,v])=>({label:k,color:v})), () => renderTrends());
+    renderLegend(pctLid, Object.entries(macroColors).map(([k,v])=>({label:k,color:v})).concat([{label:'Alcohol',color:'#E879F9'}]), () => renderTrends());
     drawBarChart('macroPctChart',pctAllDS.filter(ds => isToggled(pctLid, ds.label)),labels,100);
     const dates = days.map(d => d.date);
     if (chartMeta['macroChart']) chartMeta['macroChart'].dates = dates;
@@ -1539,6 +1620,32 @@ function renderTrends() {
   if (sub === 'weight') {
     renderWeightChart();
     renderTDEEChart();
+  }
+  // Alcohol
+  if (sub === 'alcohol') {
+    const alcData = days.map(d => d.alcohol);
+    const alcAvg = rollingAvg(alcData, 7);
+    const alcLid = 'alcoholChartLegend';
+    const allAlcDS = [
+      {data:alcData,color:'#E879F9',label:'Alcohol (g)'},
+      {data:alcAvg,color:'rgba(232,121,249,0.4)',thin:true,label:'7d avg'}
+    ];
+    renderLegend(alcLid, [
+      {label:'Alcohol (g)',color:'#E879F9'},
+      {label:'7d avg',color:'rgba(232,121,249,0.5)',dashed:true}
+    ], () => renderTrends());
+    drawChart('alcoholChart',allAlcDS.filter(ds => isToggled(alcLid, ds.label)),labels,goals.alcohol>0?goals.alcohol:null);
+    if (chartMeta['alcoholChart']) chartMeta['alcoholChart'].dates = days.map(d => d.date);
+    // Summary
+    const alcDays = days.filter(d => d.alcohol > 0);
+    const totalAlc = alcDays.reduce((a,d) => a + d.alcohol, 0);
+    const avgAlc = alcDays.length > 0 ? Math.round(totalAlc / days.length * 10) / 10 : 0;
+    const daysWithAlc = alcDays.length;
+    const alcCals = Math.round(totalAlc * 7);
+    document.getElementById('alcoholSummary').innerHTML = `
+      <strong>${daysWithAlc}</strong> of ${days.length} days had alcohol · 
+      <strong>${avgAlc}g</strong> avg/day · 
+      <strong>${alcCals}</strong> cal from alcohol (${trendRange}d)`;
   }
   // Goals
   if (sub === 'goals') {
@@ -1559,7 +1666,7 @@ function getDateRange(numDays, offset) {
     const d = new Date(); d.setDate(d.getDate() - i);
     const ds = fmtDate(d);
     const dm = meals.filter(m => m.date === ds);
-    const t = dm.reduce((a,m) => ({cal:a.cal+m.calories,prot:a.prot+m.protein,carbs:a.carbs+m.carbs,fat:a.fat+m.fat,fiber:a.fiber+(m.fiber||0)}),{cal:0,prot:0,carbs:0,fat:0,fiber:0});
+    const t = dm.reduce((a,m) => ({cal:a.cal+m.calories,prot:a.prot+m.protein,carbs:a.carbs+m.carbs,fat:a.fat+m.fat,fiber:a.fiber+(m.fiber||0),alcohol:a.alcohol+(m.alcohol||0)}),{cal:0,prot:0,carbs:0,fat:0,fiber:0,alcohol:0});
     days.push(t);
     const w = weightLog.find(w => w.date === ds);
     if (w) { weightSum += w.value; weightCount++; }
@@ -1568,9 +1675,9 @@ function getDateRange(numDays, offset) {
     if (exCal > 0) { exSum += exCal; exDays++; }
   }
   const n = days.filter(d=>d.cal>0).length || 1;
-  const sum = days.reduce((a,d)=>({cal:a.cal+d.cal,prot:a.prot+d.prot,carbs:a.carbs+d.carbs,fat:a.fat+d.fat,fiber:a.fiber+d.fiber}),{cal:0,prot:0,carbs:0,fat:0,fiber:0});
+  const sum = days.reduce((a,d)=>({cal:a.cal+d.cal,prot:a.prot+d.prot,carbs:a.carbs+d.carbs,fat:a.fat+d.fat,fiber:a.fiber+d.fiber,alcohol:a.alcohol+d.alcohol}),{cal:0,prot:0,carbs:0,fat:0,fiber:0,alcohol:0});
   return {
-    avg: {cal:Math.round(sum.cal/n),prot:Math.round(sum.prot/n),carbs:Math.round(sum.carbs/n),fat:Math.round(sum.fat/n),fiber:Math.round(sum.fiber/n)},
+    avg: {cal:Math.round(sum.cal/n),prot:Math.round(sum.prot/n),carbs:Math.round(sum.carbs/n),fat:Math.round(sum.fat/n),fiber:Math.round(sum.fiber/n),alcohol:Math.round(sum.alcohol/n)},
     days: n,
     avgWeight: weightCount > 0 ? Math.round(weightSum/weightCount*10)/10 : null,
     avgExercise: exDays > 0 ? Math.round(exSum/exDays) : 0
@@ -1628,15 +1735,17 @@ function renderSummary(days, dwd, sum, n) {
       const cal = dayMeals.reduce((a,m) => a + m.calories, 0);
       allDays.push({ date: ds, cal });
     }
-    // Current streak (from today backwards)
+    // Current streak (from today backwards, skip vacation days)
     var currentStreak = 0;
     for (let i = allDays.length - 1; i >= 0; i--) {
+      if (isVacationDay(allDays[i].date)) continue;
       if (allDays[i].cal > 0 && allDays[i].cal <= goals.cal * 1.05) currentStreak++;
       else break;
     }
-    // Longest streak ever
+    // Longest streak ever (skip vacation days)
     var longestStreak = 0, tempStreak = 0;
     for (let i = 0; i < allDays.length; i++) {
+      if (isVacationDay(allDays[i].date)) continue;
       if (allDays[i].cal > 0 && allDays[i].cal <= goals.cal * 1.05) { tempStreak++; longestStreak = Math.max(longestStreak, tempStreak); }
       else tempStreak = 0;
     }
@@ -1739,7 +1848,7 @@ function renderDonut(sum, n, canvasId, legendId) {
 
 async function addToFavorites(meal) {
   if (favorites.some(f => f.meal_name.toLowerCase() === meal.meal_name.toLowerCase())) return;
-  const fav = { meal_name:meal.meal_name, calories:meal.calories, protein:meal.protein, carbs:meal.carbs, fat:meal.fat, fiber:meal.fiber||0, type:meal.type, description:meal.description||meal.meal_name };
+  const fav = { meal_name:meal.meal_name, calories:meal.calories, protein:meal.protein, carbs:meal.carbs, fat:meal.fat, fiber:meal.fiber||0, alcohol:meal.alcohol||0, type:meal.type, description:meal.description||meal.meal_name };
   if (supaReady) {
     try { const rows = await supa('favorites','POST',{body:{meal_name:fav.meal_name,calories:fav.calories,protein:fav.protein,carbs:fav.carbs,fat:fav.fat,fiber:fav.fiber,meal_type:fav.type,description:fav.description}}); fav.id=rows[0].id; } catch(e){fav.id=Date.now();}
   } else { fav.id=Date.now(); }
@@ -1758,7 +1867,7 @@ async function quickLog(id) {
   const mealData = {date:fmtDate(now),time:now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}),type:fav.type,meal_name:fav.meal_name,description:fav.description,calories:fav.calories,protein:fav.protein,carbs:fav.carbs,fat:fav.fat,fiber:fav.fiber||0};
   if (supaReady) {
     setSyncStatus('busy','saving…');
-    try { const rows=await supa('meals','POST',{body:{date:mealData.date,time:mealData.time,meal_type:mealData.type,meal_name:mealData.meal_name,description:mealData.description,calories:mealData.calories,protein:mealData.protein,carbs:mealData.carbs,fat:mealData.fat,fiber:mealData.fiber}}); mealData.id=rows[0].id; setSyncStatus('ok','synced'); } catch(e){mealData.id=Date.now();setSyncStatus('err','sync error');}
+    try { const rows=await supa('meals','POST',{body:{date:mealData.date,time:mealData.time,meal_type:mealData.type,meal_name:mealData.meal_name,description:mealData.description,calories:mealData.calories,protein:mealData.protein,carbs:mealData.carbs,fat:mealData.fat,fiber:mealData.fiber,alcohol:mealData.alcohol||0}}); mealData.id=rows[0].id; setSyncStatus('ok','synced'); } catch(e){mealData.id=Date.now();setSyncStatus('err','sync error');}
   } else { mealData.id=Date.now(); }
   meals.unshift(mealData); viewDate=new Date();
   showQuickToast(esc(fav.meal_name) + ' logged');
@@ -1776,7 +1885,7 @@ function renderFavorites() {
   if (favorites.length===0){card.style.display='none';return;}
   card.style.display='';
   const shown = favorites.slice(0, 10);
-  list.innerHTML=shown.map(f=>`<div class="fav-item"><div class="fav-item-left"><div class="fav-item-name">${esc(f.meal_name)}</div><div class="fav-item-macros">${f.calories} cal · ${f.protein}g P · ${f.carbs}g C · ${f.fat}g F · ${f.fiber||0}g f</div></div><div class="fav-item-actions"><button class="fav-relog" onclick="quickLog(${f.id})">Log</button><button class="fav-remove" onclick="removeFavorite(${f.id})" aria-label="Remove">✕</button></div></div>`).join('');
+  list.innerHTML=shown.map(f=>`<div class="fav-item"><div class="fav-item-left"><div class="fav-item-name">${esc(f.meal_name)}</div><div class="fav-item-macros">${f.calories} cal · ${f.protein}g P · ${f.carbs}g C · ${f.fat}g F · ${f.fiber||0}g f · ${f.alcohol||0}g a</div></div><div class="fav-item-actions"><button class="fav-relog" onclick="quickLog(${f.id})">Log</button><button class="fav-remove" onclick="removeFavorite(${f.id})" aria-label="Remove">✕</button></div></div>`).join('');
 }
 
 async function logWeight() {
@@ -2142,6 +2251,8 @@ async function getMealAnalysis(mealItems, todayTotals) {
   const afterCarbs = todayTotals.carbs + totalMealCarbs;
   const afterFat = todayTotals.fat + totalMealFat;
   const afterFiber = todayTotals.fiber + totalMealFiber;
+  const totalMealAlcohol = mealItems.reduce((a,m) => a + (m.alcohol||0), 0);
+  const afterAlcohol = todayTotals.alcohol + totalMealAlcohol;
   // Get today's exercise
   const today = fmtDate(new Date());
   const todayEx = exerciseLog.filter(e => e.date === today);
@@ -2151,7 +2262,7 @@ async function getMealAnalysis(mealItems, todayTotals) {
     const data = await callClaude(key, {
       model: 'claude-sonnet-4-6', max_tokens: 200,
       system: `You are a concise nutrition coach. Given a meal, the user's daily totals after this meal, exercise burned, and their goals, give 1-2 sentences of specific actionable advice. Use NET calories (consumed minus exercise) when assessing calorie budget. Focus on what to DO — suggest swaps, flag concerns, or affirm good choices. Be direct and practical, not generic. No stats unless they support the advice. Do not repeat the meal description.`,
-      messages: [{ role: 'user', content: `Meal: ${mealSummary}\n\nAfter logging this meal:\nCalories consumed: ${afterCal} / ${goals.cal} goal\nExercise burned today: ${exBurned} cal\nNet calories: ${netCal} / ${goals.cal} goal\nProtein: ${afterProt}g / ${goals.prot}g goal\nCarbs: ${afterCarbs}g / ${goals.carbs}g goal\nFat: ${afterFat}g / ${goals.fat}g goal\nFiber: ${afterFiber}g / ${goals.fiber}g goal\n\nGive 1-2 sentences of actionable advice based on net calories.` }]
+      messages: [{ role: 'user', content: `Meal: ${mealSummary}\n\nAfter logging this meal:\nCalories consumed: ${afterCal} / ${goals.cal} goal\nExercise burned today: ${exBurned} cal\nNet calories: ${netCal} / ${goals.cal} goal\nProtein: ${afterProt}g / ${goals.prot}g goal\nCarbs: ${afterCarbs}g / ${goals.carbs}g goal\nFat: ${afterFat}g / ${goals.fat}g goal\nFiber: ${afterFiber}g / ${goals.fiber}g goal\nAlcohol: ${afterAlcohol}g\n\nGive 1-2 sentences of actionable advice based on net calories.` }]
     });
     const text = data.content.filter(b=>b.type==='text').map(b=>b.text).join('');
     if (text.trim()) {
@@ -2167,7 +2278,7 @@ function exportPDF() {
   const days30 = getDayTotals(30);
   const dwd = days30.filter(d => d.cal > 0);
   const n = dwd.length || 1;
-  const sum = dwd.reduce((a,d) => ({cal:a.cal+d.cal,prot:a.prot+d.prot,carbs:a.carbs+d.carbs,fat:a.fat+d.fat,fiber:a.fiber+d.fiber}),{cal:0,prot:0,carbs:0,fat:0,fiber:0});
+  const sum = dwd.reduce((a,d) => ({cal:a.cal+d.cal,prot:a.prot+d.prot,carbs:a.carbs+d.carbs,fat:a.fat+d.fat,fiber:a.fiber+d.fiber,alcohol:a.alcohol+d.alcohol}),{cal:0,prot:0,carbs:0,fat:0,fiber:0,alcohol:0});
   const avgCal = Math.round(sum.cal/n), avgProt = Math.round(sum.prot/n), avgCarbs = Math.round(sum.carbs/n), avgFat = Math.round(sum.fat/n), avgFiber = Math.round(sum.fiber/n);
   // Recent meals (last 7 days)
   const recent = meals.filter(m => {
@@ -2223,12 +2334,12 @@ async function suggestMeal() {
   const result=document.getElementById('suggestResult'); result.classList.remove('show');
   const today=fmtDate(new Date());
   const dayMeals=meals.filter(m=>m.date===today);
-  const t=dayMeals.reduce((a,m)=>({cal:a.cal+m.calories,prot:a.prot+m.protein,carbs:a.carbs+m.carbs,fat:a.fat+m.fat,fiber:a.fiber+(m.fiber||0)}),{cal:0,prot:0,carbs:0,fat:0,fiber:0});
+  const t=dayMeals.reduce((a,m)=>({cal:a.cal+m.calories,prot:a.prot+m.protein,carbs:a.carbs+m.carbs,fat:a.fat+m.fat,fiber:a.fiber+(m.fiber||0),alcohol:a.alcohol+(m.alcohol||0)}),{cal:0,prot:0,carbs:0,fat:0,fiber:0,alcohol:0});
   const rem={cal:Math.max(0,goals.cal-t.cal),prot:Math.max(0,goals.prot-t.prot),carbs:Math.max(0,goals.carbs-t.carbs),fat:Math.max(0,goals.fat-t.fat),fiber:Math.max(0,goals.fiber-t.fiber)};
   const memCtx=memoryNotes?`\nUser's food preferences:\n${memoryNotes}`:'';
   try {
     const data=await callClaude(key,{model:'claude-sonnet-4-6',max_tokens:500,
-      system:`You are a helpful nutrition assistant. Suggest a specific, practical meal. Be concrete — name actual dishes. Respond ONLY with a JSON object, no markdown:\n{"meal_name":"short name","description":"1-2 sentence description","calories":number,"protein":number,"carbs":number,"fat":number,"fiber":number}\nAll numbers integers.${memCtx}`,
+      system:`You are a helpful nutrition assistant. Suggest a specific, practical meal. Be concrete — name actual dishes. Respond ONLY with a JSON object, no markdown:\n{"meal_name":"short name","description":"1-2 sentence description","calories":number,"protein":number,"carbs":number,"fat":number,"fiber":number,"alcohol":number}\nAll numbers integers.${memCtx}`,
       messages:[{role:'user',content:`I've eaten ${t.cal} cal today (${t.prot}g P, ${t.carbs}g C, ${t.fat}g F, ${t.fiber}g f). Remaining: ~${rem.cal} cal, ${rem.prot}g P, ${rem.carbs}g C, ${rem.fat}g F, ${rem.fiber}g f. What should I eat?`}]});
     const text=data.content.filter(b=>b.type==='text').map(b=>b.text).join('');
     const jsonMatch=text.match(/\{[\s\S]*?"meal_name"[\s\S]*?\}/);
@@ -2335,7 +2446,7 @@ async function estimateRecipe() {
   try {
     const data = await callClaude(key, {
       model: 'claude-sonnet-4-6', max_tokens: 300,
-      system: `You are a nutrition assistant. The user describes a recipe that makes ${portions} serving(s). Estimate TOTAL nutrition for the entire recipe, not per serving. Respond ONLY with JSON:\n{"recipe_name":"short name","calories":number,"protein":number,"carbs":number,"fat":number,"fiber":number}\nAll numbers integers. No markdown.`,
+      system: `You are a nutrition assistant. The user describes a recipe that makes ${portions} serving(s). Estimate TOTAL nutrition for the entire recipe, not per serving. Respond ONLY with JSON:\n{"recipe_name":"short name","calories":number,"protein":number,"carbs":number,"fat":number,"fiber":number,"alcohol":number}\nAll numbers integers. No markdown.`,
       messages: [{ role: 'user', content: desc }]
     });
     const text = data.content.filter(b=>b.type==='text').map(b=>b.text).join('');
@@ -2454,7 +2565,7 @@ async function confirmRecipeLog() {
   if (supaReady) {
     setSyncStatus('busy','saving…');
     try {
-      const rows = await supa('meals','POST',{body:{date:mealData.date,time:mealData.time,meal_type:mealData.type,meal_name:mealData.meal_name,description:mealData.description,calories:mealData.calories,protein:mealData.protein,carbs:mealData.carbs,fat:mealData.fat,fiber:mealData.fiber}});
+      const rows = await supa('meals','POST',{body:{date:mealData.date,time:mealData.time,meal_type:mealData.type,meal_name:mealData.meal_name,description:mealData.description,calories:mealData.calories,protein:mealData.protein,carbs:mealData.carbs,fat:mealData.fat,fiber:mealData.fiber,alcohol:mealData.alcohol||0}});
       mealData.id = rows[0].id;
       setSyncStatus('ok','synced');
     } catch(e) { mealData.id = Date.now(); setSyncStatus('err','sync error'); }
@@ -2480,8 +2591,8 @@ async function addMealGroupAsRecipe(type, date) {
   if (groupMeals.length === 0) return;
   const combined = groupMeals.reduce((a,m) => ({
     cal:a.cal+m.calories, prot:a.prot+m.protein, carbs:a.carbs+m.carbs,
-    fat:a.fat+m.fat, fiber:a.fiber+(m.fiber||0)
-  }),{cal:0,prot:0,carbs:0,fat:0,fiber:0});
+    fat:a.fat+m.fat, fiber:a.fiber+(m.fiber||0),alcohol:a.alcohol+(m.alcohol||0)
+  }),{cal:0,prot:0,carbs:0,fat:0,fiber:0,alcohol:0});
   const name = type + ' — ' + groupMeals.map(m => m.meal_name).join(', ');
   const desc = groupMeals.map(m => m.description || m.meal_name).join('; ');
   const recipe = { recipe_name: name, description: desc, portions: 1, calories: combined.cal, protein: combined.prot, carbs: combined.carbs, fat: combined.fat, fiber: combined.fiber };
@@ -2572,7 +2683,8 @@ function renderCalendar() {
     const ds = `${calendarYear}-${String(calendarMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const cal = trackedDays[ds] || 0;
     let cls = 'cal-day';
-    if (cal > 0 && cal <= goals.cal * 1.05) cls += ' tracked';
+    if (isVacationDay(ds)) cls += ' vacation';
+    else if (cal > 0 && cal <= goals.cal * 1.05) cls += ' tracked';
     else if (cal > goals.cal * 1.05) cls += ' over';
     if (ds === today) cls += ' today';
     if (ds === selectedDs) cls += ' selected';
@@ -2617,7 +2729,7 @@ function searchMeals() {
     html += `<div class="search-item">
       <div class="search-item-left">
         <div class="search-item-name">${esc(m.meal_name)}</div>
-        <div class="search-item-meta">${m.date} · ${m.protein}g P · ${m.carbs}g C · ${m.fat}g F${count > 1 ? ' · logged '+count+'×' : ''}</div>
+        <div class="search-item-meta">${m.date} · ${m.protein}g P · ${m.carbs}g C · ${m.fat}g F · ${m.alcohol||0}g A${count > 1 ? ' · logged '+count+'×' : ''}</div>
       </div>
       <span class="search-item-cal">${m.calories}</span>
       <button class="log-today-btn" onclick="logSearchResult(${m.id})" style="margin-left:8px;">+Today</button>
@@ -2630,11 +2742,11 @@ async function logSearchResult(id) {
   const meal = meals.find(m => m.id === id);
   if (!meal) return;
   const now = new Date();
-  const mealData = { date:fmtDate(now), time:now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}), type:meal.type, meal_name:meal.meal_name, description:meal.description, calories:meal.calories, protein:meal.protein, carbs:meal.carbs, fat:meal.fat, fiber:meal.fiber||0 };
+  const mealData = { date:fmtDate(now), time:now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}), type:meal.type, meal_name:meal.meal_name, description:meal.description, calories:meal.calories, protein:meal.protein, carbs:meal.carbs, fat:meal.fat, fiber:meal.fiber||0, alcohol:meal.alcohol||0 };
   if (supaReady) {
     setSyncStatus('busy','saving…');
     try {
-      const rows = await supa('meals','POST',{body:{date:mealData.date,time:mealData.time,meal_type:mealData.type,meal_name:mealData.meal_name,description:mealData.description,calories:mealData.calories,protein:mealData.protein,carbs:mealData.carbs,fat:mealData.fat,fiber:mealData.fiber}});
+      const rows = await supa('meals','POST',{body:{date:mealData.date,time:mealData.time,meal_type:mealData.type,meal_name:mealData.meal_name,description:mealData.description,calories:mealData.calories,protein:mealData.protein,carbs:mealData.carbs,fat:mealData.fat,fiber:mealData.fiber,alcohol:mealData.alcohol||0}});
       mealData.id = rows[0].id;
       setSyncStatus('ok','synced');
     } catch(e) { mealData.id = Date.now(); setSyncStatus('err','save failed'); showQuickToast('⚠ Save failed'); }
@@ -2750,7 +2862,7 @@ function hideChartTooltip() {
 
 // Chart click navigation and tooltips - registered in init()
 function registerChartListeners() {
-  ['calChart','macroChart','macroPctChart','weightChart','tdeeChart'].forEach(id => {
+  ['calChart','macroChart','macroPctChart','weightChart','tdeeChart','alcoholChart'].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
     el.addEventListener('mousemove', e => showChartTooltip(id, e));

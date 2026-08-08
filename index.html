@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Fraunces:opsz,wght@9..144,400;9..144,600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=1.29b">
+  <link rel="stylesheet" href="style.css?v=1.30">
 </head>
 <body>
   <!-- AUTH OVERLAY -->
@@ -29,7 +29,7 @@
 
   <div class="container">
     <div class="logo-row">
-      <div class="logo">nutri<span>tracker</span> <span style="font-size:11px;font-weight:400;color:var(--text-3);margin-left:6px;">v1.29</span></div>
+      <div class="logo">nutri<span>tracker</span> <span style="font-size:11px;font-weight:400;color:var(--text-3);margin-left:6px;">v1.30</span></div>
       <div style="display:flex;align-items:center;gap:12px;">
         <div class="status-pill">
           <div class="dot" id="syncDot"></div>
@@ -105,6 +105,7 @@
             <div class="macro-cell"><div class="macro-num" id="pCarbs">—</div><div class="macro-label">carbs</div></div>
             <div class="macro-cell"><div class="macro-num" id="pFat">—</div><div class="macro-label">fat</div></div>
             <div class="macro-cell"><div class="macro-num" id="pFiber">—</div><div class="macro-label">fiber</div></div>
+            <div class="macro-cell"><div class="macro-num" id="pAlcohol">—</div><div class="macro-label">alcohol</div></div>
           </div>
           <p class="preview-note" id="previewNote"></p>
           <div id="servingSelector" style="display:none;margin-top:10px;">
@@ -179,6 +180,7 @@
           <div class="total-cell"><div class="total-num" id="totCarbs">0</div><div class="total-label">carbs</div></div>
           <div class="total-cell"><div class="total-num" id="totFat">0</div><div class="total-label">fat</div></div>
           <div class="total-cell"><div class="total-num" id="totFiber">0</div><div class="total-label">fiber</div></div>
+          <div class="total-cell"><div class="total-num" id="totAlcohol">0</div><div class="total-label">alcohol</div></div>
         </div>
         <div id="todayWeightRow" style="display:none;text-align:center;padding:6px 0 4px;font-size:14px;color:var(--text-2);">
           <span style="font-weight:600;color:var(--text-1);font-family:var(--font-display);" id="todayWeight">—</span> <span>lbs today</span>
@@ -232,6 +234,7 @@
             <div class="macro-cell"><div class="macro-num" id="rpCarbs">—</div><div class="macro-label">carbs</div></div>
             <div class="macro-cell"><div class="macro-num" id="rpFat">—</div><div class="macro-label">fat</div></div>
             <div class="macro-cell"><div class="macro-num" id="rpFiber">—</div><div class="macro-label">fiber</div></div>
+            <div class="macro-cell"><div class="macro-num" id="rpAlcohol">—</div><div class="macro-label">alcohol</div></div>
           </div>
           <div class="action-row">
             <button class="confirm-btn" onclick="confirmRecipe()">Save recipe</button>
@@ -267,10 +270,20 @@
           <div class="goal-cell"><span class="goal-label">Carbs (g)</span><input class="goal-input" type="number" id="goalCarbs" value="200" onchange="saveGoals()" /><span class="goal-pct" id="goalCarbsPct"></span></div>
           <div class="goal-cell"><span class="goal-label">Fat (g)</span><input class="goal-input" type="number" id="goalFat" value="65" onchange="saveGoals()" /><span class="goal-pct" id="goalFatPct"></span></div>
           <div class="goal-cell"><span class="goal-label">Fiber (g)</span><input class="goal-input" type="number" id="goalFiber" value="25" onchange="saveGoals()" /></div>
+          <div class="goal-cell"><span class="goal-label">Alcohol (g)</span><input class="goal-input" type="number" id="goalAlcohol" value="0" onchange="saveGoals()" /></div>
         </div>
         <div class="goal-pct-toggle" style="margin-top:10px;">
           <button class="save-btn" onclick="toggleGoalMode()" id="goalModeBtn">Switch to % input</button>
         </div>
+      </div>
+      <div class="card">
+        <div class="card-label">Estimation approach</div>
+        <div style="display:flex;gap:4px;margin-bottom:8px;">
+          <button class="range-btn" id="biasConservative" onclick="setEstimationBias('conservative')">Conservative</button>
+          <button class="range-btn active" id="biasBalanced" onclick="setEstimationBias('balanced')">Balanced</button>
+          <button class="range-btn" id="biasAggressive" onclick="setEstimationBias('aggressive')">Aggressive</button>
+        </div>
+        <p style="font-size:12px;color:var(--text-3);margin:0;" id="biasHint">Uses average estimates for portion sizes and preparation.</p>
       </div>
       <div class="card">
         <div class="card-label">My calibrations</div>
@@ -282,6 +295,16 @@
         <div style="margin-top:10px;display:flex;align-items:center;gap:8px;">
           <button class="save-btn" onclick="openCalModal()" id="calViewBtn" style="display:none;">View all (<span id="calCount">0</span>)</button>
           <span class="flash" id="calFlash">Saved ✓</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-label">Vacation mode</div>
+        <p style="font-size:12px;color:var(--text-3);margin:0 0 10px;">Vacation days are excluded from streaks and trend averages.</p>
+        <div id="vacationList"></div>
+        <div style="display:flex;gap:8px;align-items:flex-end;margin-top:8px;">
+          <div class="goal-cell" style="flex:1;"><span class="goal-label">Start</span><input class="goal-input" type="date" id="vacStart" /></div>
+          <div class="goal-cell" style="flex:1;"><span class="goal-label">End</span><input class="goal-input" type="date" id="vacEnd" /></div>
+          <button class="save-btn" onclick="addVacation()" style="padding:8px 14px;">Add</button>
         </div>
       </div>
       <div class="card">
@@ -302,6 +325,7 @@
         <button class="sub-tab" onclick="switchTrendSub('calories')">Calories</button>
         <button class="sub-tab" onclick="switchTrendSub('macros')">Macros</button>
         <button class="sub-tab" onclick="switchTrendSub('weight')">Weight</button>
+        <button class="sub-tab" onclick="switchTrendSub('alcohol')">Alcohol</button>
         <button class="sub-tab" onclick="switchTrendSub('goals')">Goals</button>
       </div>
 
@@ -346,6 +370,7 @@
             <div class="total-cell"><div class="total-num" id="avgCarbs">—</div><div class="total-label">avg carbs</div></div>
             <div class="total-cell"><div class="total-num" id="avgFat">—</div><div class="total-label">avg fat</div></div>
             <div class="total-cell"><div class="total-num" id="avgFiber">—</div><div class="total-label">avg fiber</div></div>
+            <div class="total-cell"><div class="total-num" id="avgAlcohol">—</div><div class="total-label">avg alcohol</div></div>
           </div>
         </div>
       </div>
@@ -402,6 +427,18 @@
           <div id="tdeeChartLegend" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px;"></div>
           <canvas id="tdeeChart" height="180"></canvas>
           <div class="empty" id="tdeeChartEmpty" style="padding:16px;">Need at least 3 weeks of calorie and weight data.</div>
+        </div>
+      </div>
+
+      <!-- ALCOHOL -->
+      <div class="trend-sub" id="trend-alcohol">
+        <div class="card">
+          <div class="card-label">Alcohol trend (grams)</div>
+          <div id="alcoholChartLegend" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px;"></div>
+          <canvas id="alcoholChart" height="200"></canvas>
+        </div>
+        <div class="card">
+          <div id="alcoholSummary" style="font-size:13px;color:var(--text-2);"></div>
         </div>
       </div>
 
@@ -501,7 +538,7 @@
     </div>
   </div>
 
-  <script src="app.js?v=1.29b"></script>
+  <script src="app.js?v=1.30"></script>
   <script>
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch(() => {});
