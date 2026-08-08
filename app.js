@@ -1,4 +1,4 @@
-// nutritracker v1.28 — app.js
+// nutritracker v1.29 — app.js
 const LS_CREDS = 'nutritracker_creds';
 const LS_SESSION = 'nutritracker_session';
 const SUPA_URL = 'https://whdamcifxsjfmnzgdrxe.supabase.co';
@@ -200,17 +200,15 @@ function toggleAuthMode() {
 
 // ─── INIT ───
 async function init() {
-  console.log('[init] starting');
   loadTheme();
   try {
     const c = JSON.parse(localStorage.getItem(LS_CREDS) || '{}');
     if (c.apiKey) document.getElementById('apiKey').value = c.apiKey;
-  } catch(e) { console.error('[init] creds parse error:', e); }
+  } catch(e) {}
 
   // Try to restore session
   let session = {};
-  try { session = JSON.parse(localStorage.getItem(LS_SESSION) || '{}'); } catch(e) { console.error('[init] session parse error:', e); }
-  console.log('[init] has session:', !!session.access_token);
+  try { session = JSON.parse(localStorage.getItem(LS_SESSION) || '{}'); } catch(e) {}
   if (session.access_token) {
     authToken = session.access_token;
     currentUser = session.user;
@@ -218,38 +216,30 @@ async function init() {
     document.getElementById('userEmail').textContent = currentUser?.email || '';
     document.getElementById('signOutArea').style.display = '';
     try {
-      console.log('[init] refreshing session...');
       const refreshed = await refreshSession();
-      console.log('[init] refresh result:', refreshed);
       if (refreshed) {
-        console.log('[init] calling connectSupabase...');
         await connectSupabase();
-        console.log('[init] connectSupabase done');
       } else {
-        console.log('[init] refresh failed, showing auth');
         authToken = null; currentUser = null;
         document.getElementById('authOverlay').style.display = '';
         document.getElementById('signOutArea').style.display = 'none';
         setSyncStatus('', '');
       }
     } catch(e) {
-      console.error('[init] auth error:', e);
+      console.error('Init auth error:', e);
       authToken = null; currentUser = null;
       document.getElementById('authOverlay').style.display = '';
       document.getElementById('signOutArea').style.display = 'none';
       setSyncStatus('err', 'connection error');
     }
   } else {
-    console.log('[init] no session, showing auth');
     document.getElementById('authOverlay').style.display = '';
   }
 
-  console.log('[init] rendering...');
   checkReady();
   renderToday();
   renderFavorites();
   registerChartListeners();
-  console.log('[init] done');
 }
 
 async function connectSupabase() {
@@ -2004,8 +1994,8 @@ function setGoalCalcMode(mode) {
   goalMode_ = mode;
   document.getElementById('goalModeDateG').classList.toggle('active', mode === 'date');
   document.getElementById('goalModeRateG').classList.toggle('active', mode === 'rate');
-  if (mode === 'rate') onGoalRateChange();
-  else onGoalDateChange();
+  // Just save and re-render stats — don't change any input values
+  saveGoalFromGoalsTab();
 }
 
 function onGoalDateChange() {
@@ -2056,41 +2046,80 @@ function renderGoalsTab() {
   document.getElementById('goalStartDate').value = goalStartDate || '';
   document.getElementById('goalModeDateG').classList.toggle('active', goalMode_ === 'date');
   document.getElementById('goalModeRateG').classList.toggle('active', goalMode_ === 'rate');
+  const resultsCard = document.getElementById('goalResultsCard');
   const area = document.getElementById('goalProgressArea');
   if (!goalWeight || !currentW) {
-    area.innerHTML = '<p style="font-size:13px;color:var(--text-3);">Set a target weight above to see progress.</p>';
-  } else {
-    const startW = goalStartDate ? (weightLog.find(w => w.date >= goalStartDate)?.value || currentW) : (weightLog.length > 0 ? weightLog[0].value : currentW);
-    const totalChange = Math.abs(startW - goalWeight);
-    const progress = totalChange > 0 ? Math.min(100, Math.round(Math.abs(startW - currentW) / totalChange * 100)) : 0;
-    const lbsLeft = Math.abs(currentW - goalWeight);
-    const direction = currentW > goalWeight ? 'to lose' : currentW < goalWeight ? 'to gain' : '';
-    const daysLeft = goalDate ? Math.max(1, Math.round((new Date(goalDate+'T12:00:00') - new Date()) / (1000*60*60*24))) : null;
-    const weeksLeft = daysLeft ? Math.round(daysLeft / 7 * 10) / 10 : null;
-    const lbsPerWeek = daysLeft ? (lbsLeft / daysLeft * 7) : null;
-    area.innerHTML = `
-      <div class="goal-progress-bar"><div class="goal-progress-fill" style="width:${progress}%"></div><div class="goal-progress-text">${progress}% — ${currentW} → ${goalWeight} lbs</div></div>
-      <div class="goal-stat-grid">
-        <div class="goal-stat"><div class="goal-stat-num">${lbsLeft.toFixed(1)}</div><div class="goal-stat-label">lbs ${direction}</div></div>
-        <div class="goal-stat"><div class="goal-stat-num">${weeksLeft || '—'}</div><div class="goal-stat-label">weeks left</div></div>
-        <div class="goal-stat"><div class="goal-stat-num">${lbsPerWeek ? lbsPerWeek.toFixed(1) : '—'}</div><div class="goal-stat-label">lbs/week</div></div>
-        <div class="goal-stat"><div class="goal-stat-num">${tdee || '—'}</div><div class="goal-stat-label">est. TDEE</div></div>
-      </div>`;
+    resultsCard.style.display = 'none';
+    return;
   }
+  resultsCard.style.display = '';
+  const startW = goalStartDate
+    ? (weightLog.find(w => w.date >= goalStartDate)?.value || (weightLog.length > 0 ? weightLog[0].value : currentW))
+    : (weightLog.length > 0 ? weightLog[0].value : currentW);
+  const totalChange = Math.abs(startW - goalWeight);
+  const progressAmt = Math.abs(startW - currentW);
+  const progress = totalChange > 0 ? Math.min(100, Math.round(progressAmt / totalChange * 100)) : 0;
+  const lbsLeft = Math.abs(currentW - goalWeight);
+  const direction = currentW > goalWeight ? 'to lose' : currentW < goalWeight ? 'to gain' : '';
+  const daysLeft = goalDate ? Math.max(1, Math.round((new Date(goalDate+'T12:00:00') - new Date()) / (1000*60*60*24))) : null;
+  const weeksLeft = daysLeft ? Math.round(daysLeft / 7 * 10) / 10 : null;
+  const lbsPerWeek = daysLeft ? (lbsLeft / daysLeft * 7) : null;
+  // Weight labels along top
+  const losing = startW > goalWeight;
+  let topLabels = [];
+  const steps = totalChange > 10 ? 4 : totalChange > 5 ? 3 : 2;
+  for (let i = 1; i < steps; i++) {
+    const frac = i / steps;
+    const w = losing ? startW - (totalChange * frac) : startW + (totalChange * frac);
+    topLabels.push({pct: Math.round(frac * 100), label: (Math.round(w * 10) / 10) + ''});
+  }
+  const topHtml = topLabels.map(t =>
+    `<span style="position:absolute;left:${t.pct}%;transform:translateX(-50%)">${t.label}</span>`
+  ).join('');
+  // Percentage position
+  const pctClass = progress >= 20 ? 'inside' : 'outside';
+  const pctStyle = progress < 20 ? `left:calc(${Math.max(progress, 2)}% + 8px)` : '';
+  // Tick marks
+  let tickHtml = '';
+  for (let p = 10; p <= 90; p += 10) tickHtml += `<span class="tick" style="left:${p}%"></span>`;
+  [25, 50, 75].forEach(p => { tickHtml += `<span class="tick-label" style="left:${p}%">${p}%</span>`; });
+
+  area.innerHTML = `
+    <div class="goal-progress-wrap">
+      <div class="goal-progress-weights">
+        <span class="gp-start">${startW} lbs</span>
+        <span style="position:relative;flex:1;text-align:center;">${topHtml}</span>
+        <span class="gp-end">${goalWeight} lbs</span>
+      </div>
+      <div class="goal-progress-bar">
+        <div class="goal-progress-fill" style="width:${Math.max(progress, 2)}%">
+          ${pctClass === 'inside' ? `<span class="goal-progress-pct inside">${progress}%</span>` : ''}
+        </div>
+        ${pctClass === 'outside' ? `<span class="goal-progress-pct outside" style="${pctStyle}">${progress}%</span>` : ''}
+      </div>
+      <div class="goal-progress-ticks">${tickHtml}</div>
+    </div>`;
+  // Daily target
   const targetEl = document.getElementById('goalTargetCal');
   const detailsEl = document.getElementById('goalTargetDetails');
   if (goalWeight && goalDate && currentW && tdee) {
-    const daysLeft = Math.max(1, Math.round((new Date(goalDate+'T12:00:00') - new Date()) / (1000*60*60*24)));
-    const lbsToChange = currentW - goalWeight;
-    const dailyDeficit = Math.round((lbsToChange * 3500) / daysLeft);
-    const targetCal = tdee - dailyDeficit;
+    const dl = Math.max(1, Math.round((new Date(goalDate+'T12:00:00') - new Date()) / (1000*60*60*24)));
+    const lbs = currentW - goalWeight;
+    const dailyDef = Math.round((lbs * 3500) / dl);
+    const targetCal = tdee - dailyDef;
     targetEl.textContent = targetCal;
-    const defLabel = lbsToChange > 0 ? 'deficit' : 'surplus';
-    detailsEl.innerHTML = `TDEE: ${tdee} · ${Math.abs(dailyDeficit)} cal/day ${defLabel} · ${Math.abs(dailyDeficit*7).toLocaleString()} cal/wk ${defLabel}`;
+    const defLabel = lbs > 0 ? 'deficit' : 'surplus';
+    detailsEl.innerHTML = `${Math.abs(dailyDef)} cal/day ${defLabel} · ${Math.abs(dailyDef*7).toLocaleString()} cal/wk ${defLabel}`;
   } else {
-    targetEl.textContent = tdee || '—';
-    detailsEl.textContent = tdee ? 'Set a weight goal to see your daily target' : 'Need more data to calculate TDEE';
+    targetEl.textContent = '—';
+    detailsEl.textContent = tdee ? 'Set a target date to see daily target' : 'Need more data to calculate TDEE';
   }
+  // Stat grid
+  document.getElementById('goalStatGrid').innerHTML = `
+    <div class="goal-stat"><div class="goal-stat-num">${lbsLeft.toFixed(1)}</div><div class="goal-stat-label">lbs ${direction}</div></div>
+    <div class="goal-stat"><div class="goal-stat-num">${weeksLeft || '—'}</div><div class="goal-stat-label">weeks left</div></div>
+    <div class="goal-stat"><div class="goal-stat-num">${lbsPerWeek ? lbsPerWeek.toFixed(1) : '—'}</div><div class="goal-stat-label">lbs/week</div></div>
+    <div class="goal-stat"><div class="goal-stat-num">${tdee || '—'}</div><div class="goal-stat-label">est. TDEE</div></div>`;
 }
 
 async function getMealAnalysis(mealItems, todayTotals) {

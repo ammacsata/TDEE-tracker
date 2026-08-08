@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;1,400&family=Fraunces:opsz,wght@9..144,400;9..144,600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=1.28c">
+  <link rel="stylesheet" href="style.css?v=1.29">
 </head>
 <body>
   <!-- AUTH OVERLAY -->
@@ -29,7 +29,7 @@
 
   <div class="container">
     <div class="logo-row">
-      <div class="logo">nutri<span>tracker</span> <span style="font-size:11px;font-weight:400;color:var(--text-3);margin-left:6px;">v1.28</span></div>
+      <div class="logo">nutri<span>tracker</span> <span style="font-size:11px;font-weight:400;color:var(--text-3);margin-left:6px;">v1.29</span></div>
       <div style="display:flex;align-items:center;gap:12px;">
         <div class="status-pill">
           <div class="dot" id="syncDot"></div>
@@ -432,13 +432,14 @@
             </div>
           </div>
         </div>
-        <div class="card">
+        <div class="card" id="goalResultsCard" style="display:none;">
           <div id="goalProgressArea"></div>
-          <div id="goalDailyTarget" style="text-align:center;padding:12px 0;">
-            <div style="font-family:var(--font-display);font-size:32px;font-weight:600;color:var(--text-1);" id="goalTargetCal">—</div>
-            <div style="font-size:13px;color:var(--text-3);">calories per day to reach goal</div>
+          <div id="goalDailyTarget" style="text-align:center;padding:16px 0 8px;">
+            <div style="font-family:var(--font-display);font-size:36px;font-weight:600;color:var(--text-1);" id="goalTargetCal">—</div>
+            <div style="font-size:14px;color:var(--text-3);">calories per day to reach goal</div>
           </div>
-          <div id="goalTargetDetails" style="font-size:13px;color:var(--text-2);text-align:center;"></div>
+          <div id="goalTargetDetails" style="font-size:13px;color:var(--text-2);text-align:center;margin-bottom:12px;"></div>
+          <div class="goal-stat-grid" id="goalStatGrid"></div>
         </div>
       </div>
     </div>
@@ -494,7 +495,7 @@
     </div>
   </div>
 
-  <script src="app.js?v=1.28c"></script>
+  <script src="app.js?v=1.29"></script>
   <script>
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch(() => {});
