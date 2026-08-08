@@ -2103,6 +2103,8 @@ function renderGoalsTab() {
   // Daily target
   const targetEl = document.getElementById('goalTargetCal');
   const detailsEl = document.getElementById('goalTargetDetails');
+  const cwEl = document.getElementById('goalCurrentWeight');
+  cwEl.textContent = currentW ? currentW + ' lbs' : '—';
   if (goalWeight && goalDate && currentW && tdee) {
     const dl = Math.max(1, Math.round((new Date(goalDate+'T12:00:00') - new Date()) / (1000*60*60*24)));
     const lbs = currentW - goalWeight;
